@@ -3,13 +3,14 @@ from setuptools import setup, find_packages
 setup(
     name='django-common-task-system',
     packages=find_packages(exclude=['local_tests']),
-    version='1.0.0',
+    version='1.0.1',
     install_requires=[
-        "django-common-objects>=1.0.0",
+        "django-common-objects>=1.0.2",
         "django>=3.2.18",
         "croniter>=1.3.8",
         "djangorestframework>=3.14.0",
-        "PyMySQL>=1.0.2"
+        "PyMySQL>=1.0.2",
+        "jionlp-time>=1.0.0",
     ],
     include_package_data=True,
     author='cone387',

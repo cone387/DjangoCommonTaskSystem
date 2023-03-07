@@ -1,0 +1,12 @@
+
+<div id="period-schedule">
+    <span class="required" style="float: left">计划时间:&nbsp;&nbsp;</span>
+    <div style="display: inline-block; float: left">
+        {% with widget=widget.subwidgets.0 %}{% include widget.template_name %}{% endwith %}<br>
+    </div>
+    <span style="float: left; margin-left: 100px">计划周期:&nbsp;&nbsp;</span>
+    <div style="display: inline-block; float: left;">
+        每 {% with widget=widget.subwidgets.1 %}{% include widget.template_name %}{% endwith %} 秒
+    </div>
+
+</div>

@@ -1,0 +1,74 @@
+<input type="{{ widget.type }}" name="{{ widget.name }}"{% if widget.value != None %} value="{{ widget.value|stringformat:'s' }}"{% endif %}{% include "django/forms/widgets/attrs.html" %}>
+
+<script>
+    const monthCalendar = new CustomCalendar();
+    function toString(dateArr) {
+        let arr = [];
+        let len = dateArr.length;
+        for (let i = 0; i < len; i++) {
+            let item = dateArr[i];
+            if (typeof item === "string") {
+                dateArr[i] = new Date(item);
+            };
+            for (let j = 0; j < i; j++) {
+                if (item.getTime() < dateArr[j]) {
+                    let tmp = dateArr[i];
+                    dateArr[i] = dateArr[j];
+                    dateArr[j] = tmp;
+                }
+            }
+        };
+        for (let i = 0, l = dateArr.length; i < l; i++) {
+            let d = dateArr[i];
+            let month = this._getTowNum(d.getMonth() + 1);
+            let day = this._getTowNum(d.getDate());
+            arr.push(month + this.separator + day);
+        }
+        return arr;
+    }
+    function getDefaultDate() {
+        var _this = this;
+        if (this.settings.target && $(this.settings.target).length) {
+            if ($(this.settings.target)[0].nodeType === 1) {
+                this.settings.focusDate = $(this.settings.target).val() || this.settings.focusDate || '';
+            } else {
+                this.settings.focusDate = $(this.settings.target).prev().val() || this.settings.focusDate || '';
+            }
+            if (this.settings.onlyYM && $(this.settings.target).val()) {
+                this.settings.focusDate = $(this.settings.target).val() + this.separator + "01";
+            }
+        }
+        if (this.settings.focusDate && !this.settings.multiple) {
+            var focusDateArr = this.settings.focusDate.split(' ')[0].split(this.separator);
+            var t = this.settings.focusDate.split(' ')[1] || "00:00:00";
+            this.defaultDate = new Date(focusDateArr[0], Number(focusDateArr[1]) - 1, focusDateArr[2], t.split(':')[0], t.split(':')[1], t.split(':')[2]);
+        }
+        if (this.settings.focusDate && this.settings.multiple) {
+            var arr = this.settings.focusDate.split(',');
+            this.dateArr = [];
+            for (var i = arr.length - 1; i >= 0; i--) {
+                var item = arr[i];
+                var focusDateArr = item.split(this.separator);
+                let date = new Date()
+                this.dateArr.push(new Date(date.getFullYear(), Number(focusDateArr[0]) - 1, focusDateArr[1]));
+            };
+            this.defaultDate = this.dateArr[0];
+            if (!_this._dateInArr(_this.defaultDate, _this.dateArr)) {
+                _this.dateArr.push(_this.date);
+            }
+        }
+    }
+    monthCalendar._toString = toString;
+    monthCalendar.getDefaultDate = getDefaultDate
+    monthCalendar.init({
+        target: $('#id_timing_year'),
+        {#range: ['2015-3-5', '2015-3-25'],#}
+        multiple: true,
+        {#maxdays: 5,#}
+        overdays: function(a) {
+            alert('添加已达上限 ' + a + ' 天');
+        },
+        toolbar: false,
+    });
+
+</script>

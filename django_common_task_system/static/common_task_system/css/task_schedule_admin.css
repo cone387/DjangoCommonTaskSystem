@@ -1,0 +1,17 @@
+#id_timing_weekday div {
+    display: inline;
+    float: left;
+    width: 80px;
+}
+
+#id_timing_weekday li {
+    display: inline-block;
+    float: left;
+    width: 80px;
+}
+
+#id_timing_monthday li {
+    display: inline-block;
+    float: left;
+    /*width: 80px;*/
+}

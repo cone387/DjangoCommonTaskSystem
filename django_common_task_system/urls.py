@@ -9,4 +9,5 @@ urlpatterns = [
     path('schedule/queue/get/', views.TaskScheduleQueueAPI.get),
     path('schedule/queue/', views.TaskScheduleQueueAPI.size),
     path('schedule/queue/<int:pk>/', views.TaskScheduleQueueAPI.get_by_id),
+    path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
 ]

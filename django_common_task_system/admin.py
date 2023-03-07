@@ -1,8 +1,8 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .choices import TaskScheduleType
 from django_common_objects.admin import UserAdmin
 from django.db.models import Count
+from .choices import TaskScheduleType, ScheduleTimingType
 from . import models, forms
 
 
@@ -66,14 +66,28 @@ class TaskScheduleCallbackAdmin(UserAdmin):
 
 
 class TaskScheduleAdmin(UserAdmin):
-    list_display = ('id', 'admin_task', 'type', 'crontab', 'next_schedule_time',
-                    'admin_period', 'admin_status', 'logs', 'update_time')
+    list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
+                    'admin_status', 'logs', 'update_time')
+
+    # readonly_fields = ("next_schedule_time", )
+
     fields = (
         ("task", "status"),
-        ("type", 'priority'),
-        'crontab',
-        ("next_schedule_time", 'period'),
-        'callback'
+        "nlp_sentence",
+        ("schedule_type", 'priority'),
+        "period_schedule",
+        "once_schedule",
+        "crontab",
+        "timing_type",
+        "timing_weekday",
+        "timing_monthday",
+        "timing_year",
+        ("timing_period", "timing_time",),
+        "timing_datetime",
+        ("schedule_start_time", "schedule_end_time"),
+        'callback',
+        'next_schedule_time',
+        'config',
     )
     form = forms.TaskScheduleForm
 
@@ -93,12 +107,29 @@ class TaskScheduleAdmin(UserAdmin):
     admin_status.boolean = True
     admin_status.short_description = '状态'
 
-    def admin_period(self, obj):
-        if obj.type != TaskScheduleType.CONTINUOUS:
-            return '-'
-        return obj.period
+    def schedule_type(self, obj):
+        t = obj.config.get("schedule_type")
+        for i in TaskScheduleType:
+            i: TaskScheduleType
+            if i == t:
+                return i.label
+        return '-'
 
-    admin_period.short_description = '周期'
+    schedule_type.short_description = '计划类型'
+
+    def schedule_sub_type(self, obj: models.TaskSchedule):
+        config = obj.config
+        schedule_type = config.get("schedule_type", "-")
+        type_config = config.get(schedule_type, {})
+        if schedule_type == TaskScheduleType.CRONTAB:
+            return type_config.get('crontab', '')
+        elif schedule_type == TaskScheduleType.CONTINUOUS:
+            return "每%s秒" % type_config.get('period', '')
+        elif schedule_type == TaskScheduleType.TIMINGS:
+            return ScheduleTimingType[config[schedule_type]['type']].label
+        return '-'
+
+    schedule_sub_type.short_description = '详细'
 
     class Media:
         js = (
@@ -106,9 +137,13 @@ class TaskScheduleAdmin(UserAdmin):
             'https://cdn.bootcss.com/popper.js/1.14.3/umd/popper.min.js',
             'https://cdn.bootcss.com/bootstrap/4.1.3/js/bootstrap.min.js',
             # reverse('admin:jsi18n'),
-            # 'js/task_schedule_admin.js',
-            'common_task_system/js/task_schedule_admin.js'
+            'common_task_system/js/task_schedule_admin.js',
         )
+        css = {
+            'all': (
+                'common_task_system/css/task_schedule_admin.css',
+            )
+        }
 
 
 class TaskScheduleLogAdmin(UserAdmin):

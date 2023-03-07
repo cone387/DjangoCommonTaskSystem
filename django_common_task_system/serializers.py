@@ -43,10 +43,11 @@ class TaskScheduleSerializer(serializers.ModelSerializer):
 class QueueScheduleSerializer(TaskScheduleSerializer):
     task = QueueTaskSerializer()
     callback = TaskCallbackSerializer()
+    schedule_time = serializers.DateTimeField(source="next_schedule_time")
 
     class Meta:
         model = models.TaskSchedule
-        fields = ('id', 'task', 'type', 'next_schedule_time', 'update_time', 'callback', 'user')
+        fields = ('id', 'task', 'schedule_time', 'update_time', 'callback', 'user')
 
 
 class TaskScheduleLogSerializer(serializers.ModelSerializer):

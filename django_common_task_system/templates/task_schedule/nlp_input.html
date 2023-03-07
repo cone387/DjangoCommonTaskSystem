@@ -1,0 +1,34 @@
+<input type="{{ widget.type }}" name="{{ widget.name }}"{% if widget.value != None %} value="{{ widget.value|stringformat:'s' }}"{% endif %}{% include "django/forms/widgets/attrs.html" %}>
+<button onclick="return validateNLPSentence()" style="border-radius: 5px;width: 80px;padding: 5px;color: white; font-size: 12px; font-weight: 800; background: #79aec8; border: none">验证</button>
+
+<script>
+    function validateNLPSentence() {
+        const $sentence = $("#id_nlp_sentence")
+        const $help = $(".form-row.field-nlp_sentence .help");
+        $help.text("验证中~")
+        $.ajax({
+            method: 'GET',
+            url: "/t/schedule/time-parse/",
+            data: {
+                sentence: $sentence.val(),
+            },
+            success: function(result){
+                console.log(result);
+                $help.text("有效的");
+                $help.attr("style", "color: green;")
+            },
+            error: function(request, status, error){
+                // console.log(request, status, error);
+                if (request.responseJSON){
+                    $help.text(request.responseJSON.error)
+                }else{
+                    $help.text("status: " + request.status)
+                }
+                $help.attr("style", "color: red;")
+            },
+
+        });
+        return false;
+    }
+
+</script>
