@@ -5,7 +5,7 @@ setup(
     packages=find_packages(exclude=['local_tests']),
     version='1.0.1',
     install_requires=[
-        "django-common-objects>=1.0.2",
+        "django-common-objects>=1.0.3",
         "django>=3.2.18",
         "croniter>=1.3.8",
         "djangorestframework>=3.14.0",
