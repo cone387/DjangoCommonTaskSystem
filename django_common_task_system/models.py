@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import models
@@ -13,11 +14,12 @@ from django.forms import ValidationError
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
 
-
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 
 UserModel = get_user_model()
+
+models.DateTimeField.__dict__['DateTimeField'] = 'datetime'
 
 
 class Task(models.Model):
@@ -44,6 +46,7 @@ class Task(models.Model):
         db_table = 'taskhub'
         verbose_name = verbose_name_plural = '任务中心'
         unique_together = ('name', 'user', 'parent')
+        abstract = "django_common_task_system" not in settings.INSTALLED_APPS
 
     def __str__(self):
         return self.name
@@ -398,6 +401,7 @@ class TaskSchedule(models.Model):
         db_table = 'task_schedule'
         verbose_name = verbose_name_plural = '任务计划'
         ordering = ('-priority', 'next_schedule_time')
+        abstract = "django_common_task_system" not in settings.INSTALLED_APPS
 
     def __str__(self):
         return self.task.name
@@ -426,6 +430,7 @@ class TaskScheduleLog(models.Model):
     class Meta:
         db_table = 'task_schedule_log'
         verbose_name = verbose_name_plural = '任务日志'
+        abstract = "django_common_task_system" not in settings.INSTALLED_APPS
 
     def __str__(self):
         return "schedule: %s, status: %s" % (self.schedule, self.status)
