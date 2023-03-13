@@ -3,7 +3,7 @@ from rest_framework.decorators import api_view
 from rest_framework.request import HttpRequest
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from . import models, serializers
+from . import models, serializers, get_task_model
 from .models import TaskSchedule
 from .choices import TaskScheduleStatus
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
@@ -14,14 +14,16 @@ from .utils.schedule_time import nlp_config_to_schedule_config
 
 schedule_queue = Queue()
 
+TaskModel = get_task_model()
+
 
 class TaskListView(UserListAPIView):
-    queryset = models.Task.objects.all()
+    queryset = TaskModel.objects.all()
     serializer_class = serializers.TaskSerializer
 
 
 class TaskDetailView(UserRetrieveAPIView):
-    queryset = models.Task.objects.all()
+    queryset = TaskModel.objects.all()
     serializer_class = serializers.TaskSerializer
 
 

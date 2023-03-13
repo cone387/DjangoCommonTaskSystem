@@ -3,7 +3,10 @@ from django.utils.html import format_html
 from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from .choices import TaskScheduleType, ScheduleTimingType
-from . import models, forms
+from . import models, forms, get_task_model, get_schedule_log_model
+
+TaskModel = get_task_model()
+TaskScheduleLogModel = get_schedule_log_model()
 
 
 class TaskAdmin(UserAdmin):
@@ -153,7 +156,7 @@ class TaskScheduleLogAdmin(UserAdmin):
         return [field.name for field in self.model._meta.fields]
 
 
-admin.site.register(models.Task, TaskAdmin)
+admin.site.register(TaskModel, TaskAdmin)
 admin.site.register(models.TaskSchedule, TaskScheduleAdmin)
 admin.site.register(models.TaskScheduleCallback, TaskScheduleCallbackAdmin)
-admin.site.register(models.TaskScheduleLog, TaskScheduleLogAdmin)
+admin.site.register(TaskScheduleLogModel, TaskScheduleLogAdmin)
