@@ -22,11 +22,12 @@ class TaskSerializer(serializers.ModelSerializer):
 
 
 class QueueTaskSerializer(TaskSerializer):
+    tags = None
 
     class Meta:
         model = TaskModel
         # fields = ('id', 'name', 'config', 'category', 'status', 'parent', )
-        exclude = ('user', 'update_time', 'description', 'create_time', 'tags')
+        exclude = ('user', 'update_time', 'description', 'create_time')
 
 
 class TaskCallbackSerializer(serializers.ModelSerializer):
