@@ -1,10 +1,11 @@
 from . import models
 from django_common_objects.serializers import CommonCategorySerializer, CommonTagSerializer
 from rest_framework import serializers
-from . import get_task_model
+from . import get_task_model, get_schedule_log_model
 
 
 TaskModel = get_task_model()
+TaskScheduleLogModel = get_schedule_log_model()
 
 
 class TaskSerializer(serializers.ModelSerializer):
@@ -58,8 +59,8 @@ class QueueScheduleSerializer(TaskScheduleSerializer):
 
 
 class TaskScheduleLogSerializer(serializers.ModelSerializer):
-    schedule = TaskScheduleSerializer()
+    schedule = serializers.PrimaryKeyRelatedField(queryset=models.TaskSchedule.objects.all())
 
     class Meta:
-        model = models.TaskScheduleLog
-        exclude = ('update_time', )
+        model = TaskScheduleLogModel
+        fields = '__all__'

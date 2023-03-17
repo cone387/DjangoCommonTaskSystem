@@ -1,5 +1,10 @@
 from django.urls import path
 from . import views
+from rest_framework import routers
+
+router = routers.DefaultRouter()
+router.register(r'schedule-log', views.ScheduleLogViewSet)
+
 
 urlpatterns = [
     path('task/', views.TaskListView.as_view()),
@@ -10,4 +15,4 @@ urlpatterns = [
     path('schedule/queue/', views.TaskScheduleQueueAPI.size),
     path('schedule/queue/<int:pk>/', views.TaskScheduleQueueAPI.get_by_id),
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
-]
+] + router.urls

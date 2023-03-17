@@ -150,7 +150,7 @@ class TaskScheduleAdmin(UserAdmin):
 
 
 class TaskScheduleLogAdmin(UserAdmin):
-    list_display = ('id', 'schedule', 'schedule_time', 'finish_time')
+    list_display = ('id', 'schedule', 'status', 'schedule_time', 'create_time')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]

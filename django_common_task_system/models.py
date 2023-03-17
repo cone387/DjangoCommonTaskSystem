@@ -431,10 +431,6 @@ class AbstractTaskScheduleLog(models.Model):
     schedule_time = models.DateTimeField(verbose_name='计划时间')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
 
-    @property
-    def finish_time(self):
-        return self.create_time
-
     class Meta:
         db_table = 'task_schedule_log'
         verbose_name = verbose_name_plural = '任务日志'
