@@ -416,6 +416,7 @@ class TaskSchedule(models.Model):
         db_table = 'task_schedule'
         verbose_name = verbose_name_plural = '任务计划'
         ordering = ('-priority', 'next_schedule_time')
+        unique_together = ('task', 'user')
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
     def __str__(self):
