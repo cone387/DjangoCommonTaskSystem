@@ -77,7 +77,7 @@ class TaskScheduleAdmin(UserAdmin):
     fields = (
         ("task", "status"),
         "nlp_sentence",
-        ("schedule_type", 'priority'),
+        ("schedule_type", 'priority', 'base_on_now'),
         "period_schedule",
         "once_schedule",
         "crontab",

@@ -261,6 +261,7 @@ class NLPSentenceWidget(forms.TextInput):
 
 class TaskScheduleForm(forms.ModelForm):
     schedule_type = forms.ChoiceField(required=True, label="计划类型", choices=TaskScheduleType.choices)
+    base_on_now = forms.BooleanField(required=False, label="基于当前时间", initial=False)
     next_schedule_time = forms.DateTimeField(required=False, label='下次计划时间',
                                              widget=forms.TextInput(attrs={'readonly': 'readonly'}))
     nlp_sentence = forms.CharField(required=False, label="NLP", help_text="自然语言，如：每天早上8点",
@@ -289,6 +290,7 @@ class TaskScheduleForm(forms.ModelForm):
             self.initial['schedule_type'] = schedule_type
             type_config = config[schedule_type]
             self.initial['nlp_sentence'] = config.get('nlp-sentence')
+            self.initial['base_on_now'] = config.get('base_on_now', False)
             if schedule_type == TaskScheduleType.CONTINUOUS:
                 t = datetime.strptime(type_config['schedule_start_time'], '%Y-%m-%d %H:%M:%S')
                 self.initial['period_schedule'] = [t, type_config['period']]

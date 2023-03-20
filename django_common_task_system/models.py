@@ -90,6 +90,7 @@ class TaskScheduleCallback(models.Model):
 class ScheduleConfig:
 
     def __init__(self,
+                 base_on_now=True,
                  nlp_sentence=None,
                  schedule_type=None,
                  crontab=None,
@@ -104,6 +105,7 @@ class ScheduleConfig:
                  timing_datetime=None,
                  config=None,
                  **kwargs):
+        self.base_on_now = base_on_now
         self.nlp_sentence = nlp_sentence
         self.schedule_type = schedule_type
         self.once_schedule = once_schedule
@@ -123,6 +125,7 @@ class ScheduleConfig:
 
     def parse_config(self, config):
         schedule_type = self.schedule_type = config['schedule_type']
+        self.base_on_now = config.get('base_on_now', False)
         type_config = config[schedule_type]
         if schedule_type == TaskScheduleType.ONCE:
             self.once_schedule = type_config['schedule_start_time']
@@ -157,6 +160,7 @@ class ScheduleConfig:
             return config
         config = {
             'schedule_type': self.schedule_type,
+            'base_on_now': self.base_on_now,
         }
         schedule_type = self.schedule_type
         type_config: dict = config.setdefault(self.schedule_type, {})
@@ -203,7 +207,10 @@ class ScheduleConfig:
         return config
 
     def get_current_time(self, start_time=None):
-        now = max(timezone.now(), start_time) if start_time else timezone.now()
+        if self.base_on_now:
+            now = timezone.now()
+        else:
+            now = start_time or timezone.now()
         now_seconds = now.hour * 3600 + now.minute * 60 + now.second
         schedule_type = self.schedule_type
         type_config = self.config[schedule_type]
