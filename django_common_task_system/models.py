@@ -138,7 +138,7 @@ class ScheduleConfig:
             ]
         elif schedule_type == TaskScheduleType.TIMINGS:
             timing_type = self.timing_type = type_config["type"]
-            self.timing_time = type_config.get('time', None)
+            self.timing_time = datetime.strptime(type_config["time"], '%H:%M:%S')
             timing_config = type_config[timing_type]
             if timing_type == ScheduleTimingType.DAY:
                 self.once_schedule = timing_config['period']
