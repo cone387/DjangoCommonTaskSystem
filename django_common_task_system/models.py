@@ -210,7 +210,10 @@ class ScheduleConfig:
         if self.base_on_now:
             now = timezone.now()
         else:
-            now = start_time or timezone.now()
+            if start_time and start_time != datetime.min:
+                now = start_time
+            else:
+                now = timezone.now()
         now_seconds = now.hour * 3600 + now.minute * 60 + now.second
         schedule_type = self.schedule_type
         type_config = self.config[schedule_type]

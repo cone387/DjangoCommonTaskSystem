@@ -12,7 +12,10 @@ from queue import Queue, Empty
 from datetime import datetime
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
+from threading import Lock
 
+
+schedule_queue_lock = Lock()
 schedule_queue = Queue()
 
 TaskModel = get_task_model()
@@ -48,12 +51,18 @@ class TaskScheduleQueueAPI:
 
     @staticmethod
     def query_expiring_schedules():
+        if schedule_queue_lock.locked():
+            return
+        schedule_queue_lock.acquire()
         now = datetime.now()
-        queryset = TaskSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
-        for schedule in queryset:
-            schedule_queue.put(serializers.QueueScheduleSerializer(schedule).data)
-            schedule.generate_next_schedule()
-        return queryset
+        try:
+            queryset = TaskSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
+            for schedule in queryset:
+                schedule_queue.put(serializers.QueueScheduleSerializer(schedule).data)
+                schedule.generate_next_schedule()
+            return queryset
+        finally:
+            schedule_queue_lock.release()
 
     @staticmethod
     @api_view(['GET'])
