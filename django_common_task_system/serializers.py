@@ -55,7 +55,8 @@ class QueueScheduleSerializer(TaskScheduleSerializer):
     class Meta:
         model = models.TaskSchedule
         # fields = ('id', 'task', 'schedule_time', 'update_time', 'callback', 'user')
-        exclude = ('priority', 'create_time', 'schedule_start_time', 'schedule_end_time', 'status')
+        exclude = ('priority', 'create_time', 'next_schedule_time', 'schedule_start_time',
+                   'schedule_end_time', 'status', 'config')
 
 
 class TaskScheduleLogSerializer(serializers.ModelSerializer):

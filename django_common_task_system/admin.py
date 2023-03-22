@@ -70,7 +70,7 @@ class TaskScheduleCallbackAdmin(UserAdmin):
 
 class TaskScheduleAdmin(UserAdmin):
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
-                    'admin_status', 'logs', 'update_time')
+                    'status', 'logs', 'update_time')
 
     # readonly_fields = ("next_schedule_time", )
 
@@ -96,19 +96,11 @@ class TaskScheduleAdmin(UserAdmin):
 
     def admin_task(self, obj):
         return format_html('<a href="/admin/task_schedule/task/%s/change/">%s</a>' % (obj.task.id, obj.task.name))
-
     admin_task.short_description = '任务'
 
     def logs(self, obj):
         return format_html('<a href="/admin/task_schedule/taskschedulelog/?schedule__id__exact=%s">查看</a>' % obj.id)
-
     logs.short_description = '日志'
-
-    def admin_status(self, obj):
-        return bool(obj.status)
-
-    admin_status.boolean = True
-    admin_status.short_description = '状态'
 
     def schedule_type(self, obj):
         t = obj.config.get("schedule_type")
