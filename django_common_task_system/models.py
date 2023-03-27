@@ -140,17 +140,15 @@ class ScheduleConfig:
             timing_type = self.timing_type = type_config["type"]
             self.timing_time = datetime.strptime(type_config["time"], '%H:%M:%S')
             timing_config = type_config[timing_type]
+            self.timing_period = timing_config.get('period')
             if timing_type == ScheduleTimingType.DAY:
-                self.once_schedule = timing_config['period']
+                pass
             elif timing_type == ScheduleTimingType.WEEKDAY:
                 self.timing_monthday = timing_config['weekday']
-                self.timing_period = timing_config['period']
             elif timing_type == ScheduleTimingType.MONTHDAY:
                 self.timing_monthday = timing_config['monthday']
-                self.timing_period = timing_config['period']
             elif timing_type == ScheduleTimingType.YEAR:
                 self.timing_year = timing_config['year']
-                self.timing_period = timing_config['period']
 
     def to_config(self):
         if self.nlp_sentence:
