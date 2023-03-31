@@ -206,12 +206,12 @@ class ScheduleConfig:
 
     def get_current_time(self, start_time=None):
         if self.base_on_now:
-            now = timezone.now()
+            now = datetime.now()
         else:
             if start_time and start_time != datetime.min:
-                now = start_time
+                now = start_time.utcnow()
             else:
-                now = timezone.now()
+                now = datetime.now()
         now_seconds = now.hour * 3600 + now.minute * 60 + now.second
         schedule_type = self.schedule_type
         type_config = self.config[schedule_type]
@@ -384,7 +384,7 @@ class ScheduleConfig:
         return next_time
 
 
-class TaskSchedule(models.Model):
+class AbstractTaskSchedule(models.Model):
     id = models.AutoField(primary_key=True)
     task = models.ForeignKey(settings.TASK_MODEL, on_delete=models.CASCADE, db_constraint=False, verbose_name='任务')
     priority = models.IntegerField(default=0, verbose_name='优先级')
@@ -417,8 +417,8 @@ class TaskSchedule(models.Model):
         db_table = 'task_schedule'
         verbose_name = verbose_name_plural = '任务计划'
         ordering = ('-priority', 'next_schedule_time')
-        unique_together = ('task', 'user')
-        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+        unique_together = ('task', 'status', 'user')
+        abstract = True
 
     def __str__(self):
         return self.task.name
@@ -430,6 +430,12 @@ class TaskSchedule(models.Model):
 
     def __gt__(self, other):
         return self.priority > other.priority
+
+
+class TaskSchedule(AbstractTaskSchedule):
+    class Meta(AbstractTaskSchedule.Meta):
+        swappable = 'TASK_SCHEDULE_MODEL'
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
 class AbstractTaskScheduleLog(models.Model):
@@ -452,6 +458,8 @@ class AbstractTaskScheduleLog(models.Model):
 
 
 class TaskScheduleLog(AbstractTaskScheduleLog):
+    schedule = models.ForeignKey(TaskSchedule, db_constraint=False, related_name='logs',
+                                 on_delete=models.CASCADE, verbose_name='任务计划')
 
     class Meta(AbstractTaskScheduleLog.Meta):
         swappable = 'TASK_SCHEDULE_LOG_MODEL'

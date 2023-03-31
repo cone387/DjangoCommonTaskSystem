@@ -10,6 +10,8 @@ TaskScheduleLogModel = get_schedule_log_model()
 
 
 class TaskAdmin(UserAdmin):
+    schedule_model = models.TaskSchedule
+
     form = forms.TaskForm
     list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
     fields = (
@@ -29,7 +31,9 @@ class TaskAdmin(UserAdmin):
 
     def admin_parent(self, obj):
         if obj.parent:
-            return format_html('<a href="/admin/task_schedule/task/%s/change/">%s</a>' % (obj.parent.id, obj.parent))
+            return format_html('<a href="/admin/%s/%s/%s/change/">%s</a>' % (
+                obj._meta.app_label, self.model._meta.model_name, obj.parent.id, obj.parent
+            ))
         return '-'
 
     admin_parent.short_description = '父任务'
@@ -43,15 +47,16 @@ class TaskAdmin(UserAdmin):
     def schedules(self, obj):
         schedules = self.extra_context['schedules'].get(obj.id, 0)
         if schedules:
-            return format_html('<a href="/admin/task_schedule/taskschedule/?task__id__exact=%s">查看(%s)</a>'
-                               % (obj.id, schedules))
+            return format_html('<a href="/admin/%s/%s/?task__id__exact=%s">查看(%s)</a>' % (
+                obj._meta.app_label, self.schedule_model._meta.model_name, obj.id, schedules
+            ))
         return '-'
 
     schedules.short_description = '任务计划'
 
     def changelist_view(self, request, extra_context=None):
         queryset = self.get_queryset(request)
-        schedules = models.TaskSchedule.objects.filter(task__in=queryset, ).values('task__id'
+        schedules = self.schedule_model.objects.filter(task__in=queryset, ).values('task__id'
                                                                                    ).annotate(Count('task__id'))
         self.extra_context['schedules'] = {x['task__id']: x['task__id__count'] for x in schedules}
         return super(TaskAdmin, self).changelist_view(request, extra_context=self.extra_context)
@@ -69,6 +74,8 @@ class TaskScheduleCallbackAdmin(UserAdmin):
 
 
 class TaskScheduleAdmin(UserAdmin):
+    task_model = TaskModel
+    schedule_log_model = TaskScheduleLogModel
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'logs', 'update_time')
 
@@ -95,11 +102,15 @@ class TaskScheduleAdmin(UserAdmin):
     form = forms.TaskScheduleForm
 
     def admin_task(self, obj):
-        return format_html('<a href="/admin/task_schedule/task/%s/change/">%s</a>' % (obj.task.id, obj.task.name))
+        return format_html('<a href="/admin/%s/%s/%s/change/">%s</a>' % (
+            obj._meta.app_label, self.task_model._meta.model_name, obj.task.id, obj.task.name
+        ))
     admin_task.short_description = '任务'
 
     def logs(self, obj):
-        return format_html('<a href="/admin/task_schedule/taskschedulelog/?schedule__id__exact=%s">查看</a>' % obj.id)
+        return format_html('<a href="/admin/%s/%s/?schedule__id__exact=%s">查看</a>' % (
+            obj._meta.app_label, self.schedule_log_model._meta.model_name, obj.id
+        ))
     logs.short_description = '日志'
 
     def schedule_type(self, obj):
