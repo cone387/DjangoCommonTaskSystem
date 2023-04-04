@@ -3,6 +3,20 @@ from .choices import SystemTaskType
 from django import forms
 
 
+task_type_fields = {
+    SystemTaskType.SQL_TASK_PRODUCE: (
+        'queue',
+        'sql',
+    ),
+    SystemTaskType.SQL_TASK_EXECUTION: (
+        'sql',
+    ),
+    SystemTaskType.SHELL_EXECUTION: (
+        'shell',
+    )
+}
+
+
 class SystemTaskForm(forms.ModelForm):
     queue = forms.ModelChoiceField(
         queryset=models.SystemScheduleQueue.objects.all(),
@@ -21,12 +35,14 @@ class SystemTaskForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()
-        if cleaned_data.get('task_type') == SystemTaskType.SQL_TASK_PRODUCE:
-            queue = cleaned_data.pop('queue')
-            if not queue:
-                self.add_error('queue', '队列不能为空')
-            else:
-                cleaned_data['config']['queue'] = queue.code
+        required_fields = task_type_fields[cleaned_data['task_type']]
+        config = cleaned_data.get('config', {})
+        queue = cleaned_data.pop('queue')
+        if queue:
+            config['queue'] = queue.code
+        for field in required_fields:
+            if not config.get(field):
+                self.add_error('config', '%s不能为空' % field)
         return cleaned_data
 
     class Meta:

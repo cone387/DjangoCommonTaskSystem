@@ -3,9 +3,10 @@ from django.db.models import TextChoices
 
 
 class SystemTaskType(TextChoices):
-    SQL_TASK_EXECUTION = 'SQL', 'SQL任务执行'
-    SQL_TASK_PRODUCE = 'TASK_PRODUCE', 'SQL任务生产'
-    SHELL_EXECUTION = 'SHELL', 'SHELL任务执行'
+    SQL_TASK_EXECUTION = 'SQL_TASK_EXECUTION', 'SQL任务执行'
+    SQL_TASK_PRODUCE = 'SQL_TASK_PRODUCE', 'SQL任务生产'
+    SHELL_EXECUTION = 'SHELL_EXECUTION', 'SHELL任务执行'
+    CUSTOM = 'CUSTOM', '自定义任务'
 
 
 class ScheduleQueueModule(TextChoices):

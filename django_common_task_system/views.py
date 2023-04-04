@@ -4,7 +4,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
-from . import serializers, get_task_model, get_schedule_log_model
+from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model
 from .models import TaskSchedule
 from .choices import TaskScheduleStatus
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
@@ -18,6 +18,7 @@ from threading import Lock
 schedule_queue_lock = Lock()
 TaskModel = get_task_model()
 ScheduleLogModel = get_schedule_log_model()
+ScheduleModel = get_task_schedule_model()
 
 
 status_params_mapping = {
@@ -27,6 +28,10 @@ status_params_mapping = {
     'done': TaskScheduleStatus.DONE.value,
     'error': TaskScheduleStatus.ERROR.value,
 }
+
+
+def get_schedule_queue(schedule: ScheduleModel):
+    return TaskScheduleQueueAPI.queue_mapping[schedule.status]
 
 
 class QueueMapping(dict):
@@ -71,7 +76,7 @@ class TaskScheduleQueueAPI:
         queryset = TaskSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
         for schedule in queryset:
             queue.put(serializers.QueueScheduleSerializer(schedule).data)
-            queue.generate_next_schedule()
+            schedule.generate_next_schedule()
         return queryset
 
     @staticmethod
@@ -110,7 +115,22 @@ class TaskScheduleQueueAPI:
 
     @staticmethod
     @api_view(['GET'])
-    def size(request):
+    def retry(request, pk):
+        try:
+            # 重试失败的任务, 这里的pk应该是schedule_log的id，schedule是会变的
+            log = ScheduleLogModel.objects.get(id=pk)
+        except ScheduleLogModel.DoesNotExist:
+            return Response({'error': 'schedule_id(%s)不存在, 重试失败' % pk}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            queue = get_schedule_queue(log.schedule)
+            queue.put(serializers.QueueScheduleSerializer(log.schedule).data)
+            return Response({'message': '成功添加到重试队列'})
+        except Exception as e:
+            return Response({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    @api_view(['GET'])
+    def status(request):
         return Response({x: y.qsize() for x, y in TaskScheduleQueueAPI.queue_mapping.items()})
 
 

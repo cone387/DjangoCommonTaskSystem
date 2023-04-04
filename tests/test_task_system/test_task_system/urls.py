@@ -19,4 +19,5 @@ from django.urls import path, include
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('system/', include('django_common_task_system.system_task.urls')),
+    path('task/', include('django_common_task_system.urls')),
 ]

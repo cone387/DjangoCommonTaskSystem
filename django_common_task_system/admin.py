@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.urls import reverse
 from django.utils.html import format_html
 from django_common_objects.admin import UserAdmin
 from django.db.models import Count
@@ -153,10 +154,18 @@ class TaskScheduleAdmin(UserAdmin):
 
 
 class TaskScheduleLogAdmin(UserAdmin):
-    list_display = ('id', 'schedule', 'status', 'schedule_time', 'create_time')
+    list_display = ('id', 'schedule', 'status', 'retry', 'schedule_time', 'create_time')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
+
+    def retry(self, obj):
+        url = reverse('task_schedule_retry', args=(obj.id,))
+        return format_html(
+            '<a href="%s" target="_blank">重试</a>' % url
+        )
+    retry.allow_tags = True
+    retry.short_description = '重试'
 
 
 admin.site.register(TaskModel, TaskAdmin)

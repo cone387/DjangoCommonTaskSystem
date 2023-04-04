@@ -5,11 +5,13 @@ from django.utils.html import format_html
 from . import models
 from . import forms
 from .. import admin as base_admin
+from .choices import SystemTaskType
 
 
 class SystemTaskAdmin(base_admin.TaskAdmin):
     form = forms.SystemTaskForm
     schedule_model = models.SystemSchedule
+    list_display = ('id', 'task_type', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
 
     fields = (
         ("parent", 'category',),
@@ -19,7 +21,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         'description',
     )
     filter_horizontal = []
-    list_filter = ('category', 'parent')
+    list_filter = ('task_type', 'category', 'parent')
 
 
 class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
@@ -27,9 +29,37 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
 
+    list_display = ('id', 'task_type', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
+                    'status', 'put', 'logs', 'update_time')
+
+    def task_type(self, obj):
+        return SystemTaskType[obj.task.task_type].label
+    task_type.short_description = '任务类型'
+
+    def put(self, obj):
+        url = reverse('system_schedule_queue_put', args=(obj.id,))
+        return format_html(
+            '<a href="%s" target="_blank">调度+1</a>' % url
+        )
+    put.allow_tags = True
+    put.short_description = '调度'
+
+    def has_delete_permission(self, request, obj=None):
+        if obj:
+            return False
+        return True
+
 
 class SystemScheduleLogAdmin(base_admin.TaskScheduleLogAdmin):
-    pass
+
+    def retry(self, obj):
+        url = reverse('system_schedule_retry', args=(obj.id,))
+        return format_html(
+            '<a href="%s" target="_blank">重试</a>' % url
+        )
+
+    retry.allow_tags = True
+    retry.short_description = '重试'
 
 
 class SystemScheduleQueueAdmin(admin.ModelAdmin):

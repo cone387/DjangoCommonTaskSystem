@@ -31,7 +31,7 @@ ALLOWED_HOSTS = ["*"]
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
+    'test_task_system.apps.TestTaskSystemAdminConfig',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
@@ -51,6 +51,13 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+]
+
+APPS_ORDER_LIST = [
+    'django_common_objects',
+    'django_common_task_system',
+    'django_common_task_system.system_task',
+    'auth'
 ]
 
 ROOT_URLCONF = 'test_task_system.urls'
@@ -125,3 +132,8 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+from django_common_objects.settings import rewrite_to
+
+rewrite_to(globals())
