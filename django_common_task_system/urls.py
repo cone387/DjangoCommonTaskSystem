@@ -11,6 +11,7 @@ urlpatterns = [
     path('task/<int:pk>/', views.TaskDetailView.as_view()),
     path('schedule/', views.TaskScheduleListView.as_view()),
     path('schedule/retry/<int:pk>/', views.TaskScheduleQueueAPI.retry, name='task_schedule_retry'),
+    path('schedule/queue/<int:pk>/put/', views.TaskScheduleQueueAPI.put, name='task_schedule_put'),
     path('schedule/<int:pk>/', views.TaskScheduleDetailView.as_view()),
     path('schedule/queue/get/', views.TaskScheduleQueueAPI.get),
     path('schedule/queue/', views.TaskScheduleQueueAPI.status),

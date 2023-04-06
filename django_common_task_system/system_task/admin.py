@@ -23,43 +23,33 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
     filter_horizontal = []
     list_filter = ('task_type', 'category', 'parent')
 
+    def has_delete_permission(self, request, obj=None):
+        if obj:
+            return obj.category != models.builtins.tasks.system_category
+        return True
+
 
 class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
 
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
-
+    schedule_put_name = 'system_schedule_queue_put'
     list_display = ('id', 'task_type', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'put', 'logs', 'update_time')
+    list_filter = ('task__task_type', 'task__category')
 
     def task_type(self, obj):
         return SystemTaskType[obj.task.task_type].label
     task_type.short_description = '任务类型'
 
-    def put(self, obj):
-        url = reverse('system_schedule_queue_put', args=(obj.id,))
-        return format_html(
-            '<a href="%s" target="_blank">调度+1</a>' % url
-        )
-    put.allow_tags = True
-    put.short_description = '调度'
-
     def has_delete_permission(self, request, obj=None):
         if obj:
-            return False
+            return obj.task.category != models.builtins.tasks.system_category
         return True
 
 
 class SystemScheduleLogAdmin(base_admin.TaskScheduleLogAdmin):
-
-    def retry(self, obj):
-        url = reverse('system_schedule_retry', args=(obj.id,))
-        return format_html(
-            '<a href="%s" target="_blank">重试</a>' % url
-        )
-
-    retry.allow_tags = True
-    retry.short_description = '重试'
+    schedule_retry_name = 'system_schedule_retry'
 
 
 class SystemScheduleQueueAdmin(admin.ModelAdmin):
@@ -81,14 +71,21 @@ class SystemScheduleQueueAdmin(admin.ModelAdmin):
 
 class SystemProcessAdmin(admin.ModelAdmin):
     list_display = ('container_id', 'container_name', 'env', 'create_time', 'update_time')
-
+    form = forms.SystemProcessForm
     fields = (
+        'system_path',
+        'system_setting',
+        'image',
+        'container_name',
         'env',
+        'create_time',
     )
+
+    readonly_fields = ('create_time', 'update_time', 'container_id')
 
     def get_queryset(self, request):
         p = subprocess.Popen('docker ps -a --filter "name=report" --format "{{.ID}} {{.Names}}"',
-                             shell=True, stdout=subprocess.PIPE)
+                             shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         out, err = p.communicate()
         if err:
             return super().get_queryset(request)

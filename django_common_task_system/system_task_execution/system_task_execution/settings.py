@@ -7,3 +7,6 @@ formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', datefm
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+
+HOST = 'http://127.0.0.1:8000'

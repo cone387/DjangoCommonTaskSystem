@@ -6,7 +6,7 @@ import requests
 
 
 class SqlExecutor(BaseExecutor):
-    name = SystemTaskType.CUSTOM.value
+    name = SystemTaskType.SQL_TASK_EXECUTION.value
 
     def execute(self):
         result = []

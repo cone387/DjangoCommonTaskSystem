@@ -77,8 +77,9 @@ class TaskScheduleCallbackAdmin(UserAdmin):
 class TaskScheduleAdmin(UserAdmin):
     task_model = TaskModel
     schedule_log_model = TaskScheduleLogModel
+    schedule_put_name = 'task_schedule_put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
-                    'status', 'logs', 'update_time')
+                    'status', 'put', 'logs', 'update_time')
 
     # readonly_fields = ("next_schedule_time", )
 
@@ -121,7 +122,6 @@ class TaskScheduleAdmin(UserAdmin):
             if i == t:
                 return i.label
         return '-'
-
     schedule_type.short_description = '计划类型'
 
     def schedule_sub_type(self, obj: models.TaskSchedule):
@@ -135,8 +135,15 @@ class TaskScheduleAdmin(UserAdmin):
         elif schedule_type == TaskScheduleType.TIMINGS:
             return ScheduleTimingType[config[schedule_type]['type']].label
         return '-'
-
     schedule_sub_type.short_description = '详细'
+
+    def put(self, obj):
+        url = reverse(self.schedule_put_name, args=(obj.id,))
+        return format_html(
+            '<a href="%s" target="_blank">调度+1</a>' % url
+        )
+    put.allow_tags = True
+    put.short_description = '调度'
 
     class Media:
         js = (
@@ -154,13 +161,14 @@ class TaskScheduleAdmin(UserAdmin):
 
 
 class TaskScheduleLogAdmin(UserAdmin):
+    schedule_retry_name = 'task_schedule_retry'
     list_display = ('id', 'schedule', 'status', 'retry', 'schedule_time', 'create_time')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
 
     def retry(self, obj):
-        url = reverse('task_schedule_retry', args=(obj.id,))
+        url = reverse(self.schedule_retry_name, args=(obj.id,))
         return format_html(
             '<a href="%s" target="_blank">重试</a>' % url
         )

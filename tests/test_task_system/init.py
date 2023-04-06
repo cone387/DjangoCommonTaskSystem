@@ -9,6 +9,11 @@ def create_schedules():
     from django_common_task_system.system_task import models
     from django_common_task_system.system_task.choices import SystemTaskType
     from django.contrib.auth.models import User
+
+    from django_common_task_system.system_task.models import builtins
+
+    builtins.schedules;
+    return
     user, created = User.objects.get_or_create(username='test')
     if created:
         user.set_password('3.1415926')

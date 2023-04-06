@@ -2,24 +2,51 @@
 import time
 import sys
 import copy
+import requests
 from queue import Queue, Empty
 from datetime import datetime
+from django.urls import reverse
 from .executors import Executors
-from .settings import logger
+from . import settings
 from django_common_task_system.system_task.choices import SystemTaskType
+from django_common_task_system.system_task.models import SystemSchedule, SystemTask
+from django_common_task_system.models import TaskScheduleCallback
+from django_common_task_system.choices import TaskScheduleStatus
 
 system_task_queue = Queue()
+logger = settings.logger
 
 
 def query_system_schedule():
-    from django_common_task_system.choices import TaskScheduleStatus
-    from django_common_task_system.system_task.models import SystemSchedule
+
     now = datetime.now()
     queryset = SystemSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
     for schedule in queryset:
         system_task_queue.put(copy.deepcopy(schedule))
         schedule.generate_next_schedule()
     return queryset
+
+
+def request_system_schedule():
+
+    url = settings.HOST + reverse('system_schedule_queue_get', args=('system', ))
+    response = requests.get(url)
+    if response.status_code == 200:
+        result = response.json()
+        callback = result.pop('callback')
+        if callback:
+            callback = TaskScheduleCallback(**callback)
+        task = result.pop('task')
+        category = task.pop('category')
+        tags = task.pop('tags', None)
+        user = result.pop('user', None)
+        result['next_schedule_time'] = datetime.strptime(result.pop('schedule_time'), '%Y-%m-%d %H:%M:%S')
+        schedule = SystemSchedule(
+            task=SystemTask(**task),
+            callback=callback,
+            **result
+        )
+        system_task_queue.put(schedule)
 
 
 def get_system_schedule():
@@ -29,6 +56,8 @@ def get_system_schedule():
         sys.stdout.write('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
         sys.stdout.flush()
         query_system_schedule()
+        if system_task_queue.empty():
+            request_system_schedule()
     return get_system_schedule()
 
 
@@ -37,7 +66,7 @@ def get_schedule_executor(schedule):
         try:
             cls = Executors[schedule.task.name]
         except KeyError:
-            raise RuntimeError('executor not found for task type: %s' % schedule.task.name)
+            raise RuntimeError('executor not found for task name: %s' % schedule.task.name)
     else:
         try:
             cls = Executors[schedule.task.task_type]

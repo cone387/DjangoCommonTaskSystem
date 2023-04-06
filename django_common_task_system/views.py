@@ -21,7 +21,7 @@ ScheduleLogModel = get_schedule_log_model()
 ScheduleModel = get_task_schedule_model()
 
 
-status_params_mapping = {
+params_status_mapping = {
     'opening': TaskScheduleStatus.OPENING.value,
     'closed': TaskScheduleStatus.CLOSED.value,
     'test': TaskScheduleStatus.TEST.value,
@@ -29,9 +29,11 @@ status_params_mapping = {
     'error': TaskScheduleStatus.ERROR.value,
 }
 
+status_params_mapping = {v: k for k, v in params_status_mapping.items()}
+
 
 def get_schedule_queue(schedule: ScheduleModel):
-    return TaskScheduleQueueAPI.queue_mapping[schedule.status]
+    return TaskScheduleQueueAPI.queue_mapping[status_params_mapping[schedule.status]]
 
 
 class QueueMapping(dict):
@@ -68,7 +70,7 @@ class ScheduleLogViewSet(ModelViewSet):
 
 
 class TaskScheduleQueueAPI:
-    queue_mapping = QueueMapping(status_params_mapping)
+    queue_mapping = QueueMapping(params_status_mapping)
 
     @staticmethod
     def query_expiring_schedules(queue, schedule_status):
@@ -83,8 +85,8 @@ class TaskScheduleQueueAPI:
     @api_view(['GET'])
     def get(request: Request):
         schedule_status = request.query_params.get('status', 'opening')
-        if schedule_status not in status_params_mapping:
-            return Response({'error': 'status must be in {}'.format(list(status_params_mapping.keys()))},
+        if schedule_status not in params_status_mapping:
+            return Response({'error': 'status must be in {}'.format(list(params_status_mapping.keys()))},
                             status=status.HTTP_400_BAD_REQUEST)
         queue = TaskScheduleQueueAPI.queue_mapping[schedule_status]
         try:
@@ -127,6 +129,20 @@ class TaskScheduleQueueAPI:
             return Response({'message': '成功添加到重试队列'})
         except Exception as e:
             return Response({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    @api_view(['GET'])
+    def put(request: Request, pk: int):
+        try:
+            schedule = TaskSchedule.objects.get(id=pk)
+        except TaskSchedule.DoesNotExist:
+            return Response({'error': 'TaskSchedule(%s)不存在, 重试失败' % pk}, status=status.HTTP_404_NOT_FOUND)
+        try:
+            queue = get_schedule_queue(schedule)
+            queue.put(serializers.QueueScheduleSerializer(schedule).data)
+            return Response({'message': '成功添加到队列'})
+        except Exception as e:
+            return Response({'error': '添加到队列失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
     @api_view(['GET'])

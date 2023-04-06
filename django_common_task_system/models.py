@@ -42,14 +42,6 @@ class AbstractTask(models.Model):
     def associated_tasks_ids(self):
         return foreign_key.get_related_object_ids(self)
 
-    @property
-    def default_category(self):
-        return CommonCategory.objects.get_or_create(name='默认', model=self._meta.label, user_id=self.user_id)[0]
-
-    @property
-    def test_category(self):
-        return CommonCategory.objects.get_or_create(name='测试', model=self._meta.label, user_id=self.user_id)[0]
-
     class Meta:
         db_table = 'taskhub'
         verbose_name = verbose_name_plural = '任务中心'

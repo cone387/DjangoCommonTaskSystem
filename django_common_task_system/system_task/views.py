@@ -1,3 +1,4 @@
+from datetime import datetime
 from django.dispatch import receiver
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -9,10 +10,13 @@ from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django_common_task_system import serializers
 from django_common_task_system.system_task.choices import SystemTaskType
+from django_common_task_system.choices import TaskScheduleStatus
 from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, SystemScheduleLog
 from queue import Empty
+from threading import Lock
 
 
+schedule_queue_lock = Lock()
 # 后面可以改用类重写，然后可以自定义配置使用什么队列，比如redis
 _system_queues = {}
 try:
@@ -78,6 +82,16 @@ class ScheduleProduceView(APIView):
 class SystemScheduleQueueAPI:
 
     @staticmethod
+    def query_system_schedules():
+        now = datetime.now()
+        queue = _system_queues[_system_queue.code]
+        queryset = SystemSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
+        for schedule in queryset:
+            queue.put(serializers.QueueScheduleSerializer(schedule).data)
+            schedule.generate_next_schedule()
+        return queryset
+
+    @staticmethod
     @api_view(['GET'])
     def get(request: Request, code: str):
         queue = _system_queues.get(code, None)
@@ -86,6 +100,14 @@ class SystemScheduleQueueAPI:
         try:
             task = queue.get_nowait()
         except Empty:
+            if code == _system_queue.code:
+                if schedule_queue_lock.acquire(blocking=False):
+                    try:
+                        SystemScheduleQueueAPI.query_system_schedules()
+                    except Exception as e:
+                        return Response({'error': '查询任务失败: %s' % e}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    finally:
+                        schedule_queue_lock.release()
             return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_204_NO_CONTENT)
         return Response(task)
 
