@@ -61,7 +61,7 @@ class Task(AbstractTask):
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
-class TaskScheduleCallback(models.Model):
+class AbstractScheduleCallback(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100, verbose_name='回调')
     description = models.TextField(blank=True, null=True, verbose_name='描述')
@@ -79,12 +79,17 @@ class TaskScheduleCallback(models.Model):
         db_table = 'task_schedule_callback'
         verbose_name = verbose_name_plural = '任务回调'
         unique_together = ('name', 'user')
-        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+        abstract = True
 
     def __str__(self):
         return self.name
 
     __repr__ = __str__
+
+
+class TaskScheduleCallback(AbstractScheduleCallback):
+    class Meta(AbstractScheduleCallback.Meta):
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
 class ScheduleConfig:

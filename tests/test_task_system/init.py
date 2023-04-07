@@ -12,12 +12,13 @@ def create_schedules():
 
     from django_common_task_system.system_task.models import builtins
 
-    builtins.schedules;
-    return
-    user, created = User.objects.get_or_create(username='test')
+    # builtins.schedules;
+    # return
+    user, created = User.objects.get_or_create(username='test', is_superuser=True)
     if created:
         user.set_password('3.1415926')
         user.save()
+    return user
 
     models.SystemTask.objects.filter(user=user).delete()
     models.SystemSchedule.objects.filter(task__user=user).delete()

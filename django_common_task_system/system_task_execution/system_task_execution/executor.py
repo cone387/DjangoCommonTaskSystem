@@ -1,6 +1,5 @@
 
 import time
-import sys
 import copy
 import requests
 from queue import Queue, Empty
@@ -53,8 +52,7 @@ def get_system_schedule():
     try:
         return system_task_queue.get(timeout=2)
     except Empty:
-        sys.stdout.write('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
-        sys.stdout.flush()
+        logger.debug('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
         query_system_schedule()
         if system_task_queue.empty():
             request_system_schedule()
@@ -75,26 +73,19 @@ def get_schedule_executor(schedule):
     return cls(schedule)
 
 
-class Runner(object):
+def run():
+    schedule = get_system_schedule()
+    logger.info('get system schedule: %s', schedule)
+    executor = get_schedule_executor(schedule)
+    log, err = executor.start()
+    if not err:
+        logger.info('system schedule execute success: %s', log.result)
 
-    def __init__(self, sys_path, sys_settings=None):
-        self.sys_path = sys_path
-        self.sys_settings = sys_settings
 
-    def run(self):
-        schedule = get_system_schedule()
-        logger.info('get system schedule: %s', schedule)
-        executor = get_schedule_executor(schedule)
-        log, err = executor.start()
-        if not err:
-            logger.info('system schedule execute success: %s', log.result)
-
-    def start(self):
-        run = self.run
-        logger.info('system executor start')
-        while True:
-            try:
-                run()
-            except Exception as e:
-                logger.exception(e)
-
+def start_client(**kwargs):
+    logger.info('system executor start')
+    while True:
+        try:
+            run()
+        except Exception as e:
+            logger.exception(e)

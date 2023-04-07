@@ -1,8 +1,7 @@
-from django.core.exceptions import AppRegistryNotReady
 from django.db import models
 from django.conf import settings
 from django_common_task_system.models import AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, \
-    Task, TaskSchedule, TaskScheduleLog
+    TaskScheduleLog, AbstractScheduleCallback
 from .choices import SystemTaskType, ScheduleQueueModule
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
@@ -62,9 +61,21 @@ class SystemScheduleQueue(models.Model):
         return "%s(%s)" % (self.name, self.code)
 
 
+class SystemScheduleCallback(AbstractScheduleCallback):
+    queue = models.ForeignKey(SystemScheduleQueue, db_constraint=False, related_name='callbacks',
+                              on_delete=models.CASCADE, verbose_name='队列')
+
+    class Meta(AbstractScheduleCallback.Meta):
+        db_table = 'system_schedule_callback'
+        verbose_name = verbose_name_plural = '系统回调'
+        abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
+
+
 class SystemSchedule(AbstractTaskSchedule):
     task = models.ForeignKey(SystemTask, db_constraint=False, related_name='schedules',
                              on_delete=models.CASCADE, verbose_name='任务')
+    callback = models.ForeignKey(SystemScheduleCallback, on_delete=models.CASCADE,
+                                 null=True, blank=True, db_constraint=False, verbose_name='回调')
 
     class Meta(AbstractTaskSchedule.Meta):
         db_table = 'system_schedule'
@@ -86,10 +97,11 @@ class SystemScheduleLog(AbstractTaskScheduleLog):
 
 class SystemProcess(models.Model):
     id = models.AutoField(primary_key=True, verbose_name='ID')
-    container_id = models.CharField(max_length=100, verbose_name='容器ID', unique=True)
-    container_name = models.CharField(max_length=100, verbose_name='容器名称', unique=True)
-    env = models.JSONField(verbose_name='环境变量', default=dict)
-    status = models.CharField(max_length=100, verbose_name='状态', default='running')
+    process_id = models.PositiveIntegerField(verbose_name='进程ID', unique=True)
+    process_name = models.CharField(max_length=100, verbose_name='进程名称')
+    env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
+    status = models.BooleanField(default=True, verbose_name='状态')
+    log_file = models.CharField(max_length=200, verbose_name='日志文件')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -98,7 +110,7 @@ class SystemProcess(models.Model):
         verbose_name = verbose_name_plural = '系统进程'
 
     def __str__(self):
-        return "%s(%s)" % (self.container_id, self.container_name)
+        return "%s(%s)" % (self.process_name, self.process_id)
 
 
 class BuiltinTasks:

@@ -2,10 +2,6 @@ from django.apps import apps as django_apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from django_common_task_system.management.commands.runserver import Command
-from django.core.management.commands import runserver
-runserver.Command = Command
-
 
 if not hasattr(settings, 'TASK_MODEL'):
     setattr(settings, 'TASK_MODEL', 'django_common_task_system.Task')

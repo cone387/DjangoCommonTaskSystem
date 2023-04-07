@@ -8,12 +8,15 @@ from rest_framework import status
 from django.utils.module_loading import import_string
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
+from django.http.response import HttpResponse
 from django_common_task_system import serializers
 from django_common_task_system.system_task.choices import SystemTaskType
 from django_common_task_system.choices import TaskScheduleStatus
-from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, SystemScheduleLog
+from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, \
+    SystemScheduleLog, SystemProcess
 from queue import Empty
 from threading import Lock
+import os
 
 
 schedule_queue_lock = Lock()
@@ -147,3 +150,31 @@ class SystemScheduleQueueAPI:
             k: v.qsize() for k, v in _system_queues.items()
         }
         return Response(data)
+
+
+class SystemProcessView:
+
+    @staticmethod
+    def show_logs(request: Request, process_id: int):
+        # 此处pk为进程id
+        try:
+            process = SystemProcess.objects.get(process_id=process_id)
+        except SystemProcess.DoesNotExist:
+            return HttpResponse('SystemProcess(%s)不存在' % process_id)
+        if not os.path.isfile(process.log_file):
+            return HttpResponse('log文件不存在')
+        offset = int(request.GET.get('offset', 0))
+        with open(process.log_file, 'r', encoding='utf-8') as f:
+            f.seek(offset)
+            logs = f.read(offset + 1024 * 1024 * 8)
+        return HttpResponse(logs, content_type='text/plain; charset=utf-8')
+
+    @staticmethod
+    def stop_process(request: Request, process_id: int):
+        try:
+            process = SystemProcess.objects.get(process_id=process_id)
+        except SystemProcess.DoesNotExist:
+            return HttpResponse('SystemProcess(%s)不存在' % process_id)
+        process.delete()
+        return HttpResponse('SystemProcess(%s)已停止' % process_id)
+
