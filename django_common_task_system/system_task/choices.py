@@ -2,13 +2,6 @@ import queue
 from django.db.models import TextChoices
 
 
-class SystemTaskType(TextChoices):
-    SQL_TASK_EXECUTION = 'SQL_TASK_EXECUTION', 'SQL任务执行'
-    SQL_TASK_PRODUCE = 'SQL_TASK_PRODUCE', 'SQL任务生产'
-    SHELL_EXECUTION = 'SHELL_EXECUTION', 'SHELL任务执行'
-    CUSTOM = 'CUSTOM', '自定义任务'
-
-
 class ScheduleQueueModule(TextChoices):
     QUEUE = "%s.%s" % (queue.Queue.__module__, queue.Queue.__name__), '普通队列'
     STACK = "%s.%s" % (queue.LifoQueue.__module__, queue.LifoQueue.__name__), '后进先出队列'

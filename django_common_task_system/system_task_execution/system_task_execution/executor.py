@@ -7,8 +7,7 @@ from datetime import datetime
 from django.urls import reverse
 from .executors import Executors
 from . import settings
-from django_common_task_system.system_task.choices import SystemTaskType
-from django_common_task_system.system_task.models import SystemSchedule, SystemTask
+from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins
 from django_common_task_system.models import TaskScheduleCallback
 from django_common_task_system.choices import TaskScheduleStatus
 
@@ -60,16 +59,15 @@ def get_system_schedule():
 
 
 def get_schedule_executor(schedule):
-    if schedule.task.task_type == SystemTaskType.CUSTOM:
+    try:
+        if not schedule.task.parent:
+            raise KeyError
+        cls = Executors[schedule.task.parent.name]
+    except KeyError:
         try:
             cls = Executors[schedule.task.name]
         except KeyError:
             raise RuntimeError('executor not found for task name: %s' % schedule.task.name)
-    else:
-        try:
-            cls = Executors[schedule.task.task_type]
-        except KeyError:
-            raise RuntimeError('executor not found for task type: %s' % schedule.task.task_type)
     return cls(schedule)
 
 

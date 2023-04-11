@@ -10,10 +10,10 @@ from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
 from django_common_task_system import serializers
-from django_common_task_system.system_task.choices import SystemTaskType
 from django_common_task_system.choices import TaskScheduleStatus
 from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, \
     SystemScheduleLog, SystemProcess
+from .models import builtins
 from queue import Empty
 from threading import Lock
 import os
@@ -21,39 +21,30 @@ import os
 
 schedule_queue_lock = Lock()
 # 后面可以改用类重写，然后可以自定义配置使用什么队列，比如redis
-_system_queues = {}
-try:
-    for q in SystemScheduleQueue.objects.filter(status=True):
-        _system_queues[q.code] = import_string(q.module)()
-    _system_queue = SystemScheduleQueue.get_or_create_default()
-    _system_queues[_system_queue.code] = import_string(_system_queue.module)()
-except Exception as err:
-    import warnings
-    warnings.warn('初始化队列失败: %s' % err)
 
 
 def get_schedule_queue(schedule: SystemSchedule):
-    return _system_queues[_system_queue.code]
+    return builtins.queues.system_task_queue
 
 
 @receiver(post_delete, sender=SystemScheduleQueue)
 def delete_queue(sender, instance: SystemScheduleQueue, **kwargs):
-    _system_queues.pop(instance.code, None)
+    builtins.queues.system_task_queue.pop(instance.code, None)
 
 
 @receiver(post_save, sender=SystemScheduleQueue)
 def add_queue(sender, instance: SystemScheduleQueue, created, **kwargs):
-    if instance.status and instance.code not in _system_queues:
-        _system_queues[instance.code] = import_string(instance.module)()
+    if instance.status and instance.code not in builtins.queues:
+        builtins.queues[instance.code] = import_string(instance.module)()
     elif not instance.status:
-        _system_queues.pop(instance.code, None)
+        builtins.queues.pop(instance.code, None)
 
 
 class ScheduleProduceView(APIView):
 
     def post(self, request: Request, pk: int):
         try:
-            schedule = SystemSchedule.objects.get(id=pk, task__task_type=SystemTaskType.SQL_TASK_PRODUCE)
+            schedule = SystemSchedule.objects.get(id=pk)
         except SystemSchedule.DoesNotExist:
             return Response({'message': 'schedule_id(%s)不存在' % pk}, status=status.HTTP_404_NOT_FOUND)
         sql: str = schedule.task.config.get('sql', '').strip()
@@ -62,7 +53,7 @@ class ScheduleProduceView(APIView):
         if not sql.startswith('select'):
             return Response({'message': 'sql语句必须以select开头'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            queue = _system_queues[schedule.task.config['queue']]
+            queue = builtins.queues[schedule.task.config['queue']]
             max_size = schedule.task.config.get('max_size', 10000)
             if queue.qsize() > max_size:
                 return Response({'message': '队列(%s)已满(%s)' % (schedule.task.config['queue'], max_size)},
@@ -87,7 +78,7 @@ class SystemScheduleQueueAPI:
     @staticmethod
     def query_system_schedules():
         now = datetime.now()
-        queue = _system_queues[_system_queue.code]
+        queue = builtins.queues.system_task_queue
         queryset = SystemSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
         for schedule in queryset:
             queue.put(serializers.QueueScheduleSerializer(schedule).data)
@@ -97,13 +88,13 @@ class SystemScheduleQueueAPI:
     @staticmethod
     @api_view(['GET'])
     def get(request: Request, code: str):
-        queue = _system_queues.get(code, None)
+        queue = builtins.queues.get(code, None)
         if queue is None:
             return Response({'message': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
         try:
             task = queue.get_nowait()
         except Empty:
-            if code == _system_queue.code:
+            if code == builtins.queues.system_task_instance.code:
                 if schedule_queue_lock.acquire(blocking=False):
                     try:
                         SystemScheduleQueueAPI.query_system_schedules()
@@ -147,7 +138,7 @@ class SystemScheduleQueueAPI:
     @api_view(['GET'])
     def status(request: Request):
         data = {
-            k: v.qsize() for k, v in _system_queues.items()
+            k: v.qsize() for k, v in builtins.queues.items()
         }
         return Response(data)
 

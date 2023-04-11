@@ -1,11 +1,11 @@
 from .base import BaseExecutor
-from django_common_task_system.system_task.choices import SystemTaskType
+from django_common_task_system.system_task.models import builtins
 import sys
 import subprocess
 
 
 class ShellExecutor(BaseExecutor):
-    name = SystemTaskType.SHELL_EXECUTION.value
+    name = builtins.tasks.shell_execution_parent_task.name
 
     def execute(self):
         if sys.platform == 'win32':

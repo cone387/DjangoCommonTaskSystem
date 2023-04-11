@@ -1,12 +1,12 @@
 from .base import BaseExecutor
-from django_common_task_system.system_task.choices import SystemTaskType
 from django.db import connection
 from django.shortcuts import reverse
+from django_common_task_system.system_task.models import builtins
 import requests
 
 
 class SqlExecutor(BaseExecutor):
-    name = SystemTaskType.SQL_TASK_EXECUTION.value
+    name = builtins.tasks.sql_execution_parent_task.name
 
     def execute(self):
         result = []
@@ -24,7 +24,7 @@ class SqlExecutor(BaseExecutor):
 
 
 class SqlProduceExecutor(BaseExecutor):
-    name = SystemTaskType.SQL_TASK_PRODUCE.value
+    name = builtins.tasks.sql_produce_parent_task.name
 
     def execute(self):
         url = reverse('system_schedule_produce', args=(self.schedule.id,))

@@ -1,24 +1,9 @@
 from . import models
-from .choices import SystemTaskType
 from django import forms
 import os
 import time
 from .process import ProcessManager
 from ..system_task_execution.main import start_by_server
-
-
-task_type_fields = {
-    SystemTaskType.SQL_TASK_PRODUCE: (
-        'queue',
-        'sql',
-    ),
-    SystemTaskType.SQL_TASK_EXECUTION: (
-        'sql',
-    ),
-    SystemTaskType.SHELL_EXECUTION: (
-        'shell',
-    )
-}
 
 
 class SystemTaskForm(forms.ModelForm):
@@ -32,14 +17,16 @@ class SystemTaskForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super(SystemTaskForm, self).__init__(*args, **kwargs)
         if self.instance.id:
-            if self.instance.task_type == SystemTaskType.SQL_TASK_PRODUCE:
+            if self.instance.parent is not None and \
+                    self.instance.parent == models.builtins.tasks.sql_produce_parent_task:
                 self.fields['queue'].initial = models.SystemScheduleQueue.objects.get(
                     code=self.instance.config.get('queue')
                 )
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()
-        required_fields = task_type_fields[cleaned_data['task_type']]
+        parent = cleaned_data.get('parent')
+        required_fields = parent.config.get('required_fields', []) if parent else []
         config = cleaned_data.get('config', {})
         queue = cleaned_data.pop('queue')
         if queue:

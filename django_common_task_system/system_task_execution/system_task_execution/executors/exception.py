@@ -2,7 +2,7 @@ from django.urls import reverse
 import requests
 from .base import BaseExecutor
 from django.db import connection
-from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
+from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule, builtins
 from django_common_task_system.models import TaskSchedule, TaskScheduleLog
 from .. import settings
 
@@ -22,7 +22,7 @@ def get_schedule_table_columns(table):
 
 
 class SystemExceptionExecutor(BaseExecutor):
-    name = '系统异常处理'
+    name = builtins.tasks.system_exception_handling.name
     schedule_model = SystemSchedule
     schedule_log_model = SystemScheduleLog
     handle_url = 'system_schedule_queue_put'
@@ -51,7 +51,7 @@ class SystemExceptionExecutor(BaseExecutor):
 
 
 class ScheduleExceptionExecutor(SystemExceptionExecutor):
-    name = '任务异常处理'
+    name = builtins.tasks.task_exception_handling.name
     schedule_model = TaskSchedule
     schedule_log_model = TaskScheduleLog
     handle_url = 'task_schedule_put'

@@ -6,7 +6,6 @@ from django.db.models.signals import post_delete
 from . import models
 from . import forms
 from .. import admin as base_admin
-from .choices import SystemTaskType
 from .process import ProcessManager
 from ..system_task_execution.main import start_by_server
 import os
@@ -18,9 +17,12 @@ def init_system_process():
         os.mkdir(logs_path)
     models.SystemProcess.objects.all().delete()
     name = 'system-process-default'
+    log_file = os.path.join(logs_path, f'{name}.log')
+    if os.path.isfile(log_file):
+        os.remove(log_file)
     instance = models.SystemProcess(
         process_name=name,
-        log_file=os.path.join(logs_path, f'{name}.log'),
+        log_file=log_file
     )
     process = ProcessManager.create(start_by_server, instance.log_file)
     instance.process_id = process.pid
@@ -47,21 +49,21 @@ def delete_process(sender, instance: models.SystemProcess, **kwargs):
 class SystemTaskAdmin(base_admin.TaskAdmin):
     form = forms.SystemTaskForm
     schedule_model = models.SystemSchedule
-    list_display = ('id', 'task_type', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
+    list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
 
     fields = (
         ("parent", 'category',),
-        ('task_type', 'queue',),
+        ('queue',),
         ("name", "status",),
         "config",
         'description',
     )
     filter_horizontal = []
-    list_filter = ('task_type', 'category', 'parent')
+    list_filter = ('category', 'parent')
 
     def has_delete_permission(self, request, obj=None):
         if obj:
-            return obj.category != models.builtins.tasks.system_category
+            return obj.category != models.builtins.tasks.system_default_category
         return True
 
 
@@ -74,13 +76,9 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
     schedule_put_name = 'system_schedule_queue_put'
-    list_display = ('id', 'task_type', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
+    list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'put', 'logs', 'update_time')
-    list_filter = ('task__task_type', 'task__category')
-
-    def task_type(self, obj):
-        return SystemTaskType[obj.task.task_type].label
-    task_type.short_description = '任务类型'
+    list_filter = ('task__category', )
 
     def has_delete_permission(self, request, obj=None):
         if obj:
