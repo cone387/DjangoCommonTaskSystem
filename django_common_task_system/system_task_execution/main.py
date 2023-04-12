@@ -14,6 +14,8 @@ def start_by_server(log_file=None, **kwargs):
     from .system_task_execution import settings
     logger = settings.logger
     logger.handlers.clear()
+    if not os.path.exists(os.path.dirname(log_file)):
+        os.makedirs(os.path.dirname(log_file))
 
     handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024 * 10, encoding='utf-8', backupCount=5)
     formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')

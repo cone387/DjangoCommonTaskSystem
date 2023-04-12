@@ -365,6 +365,8 @@ class ScheduleConfig:
                         break
                 else:
                     month = (last_time.month + timing_period) % 12
+                    if month == 0:
+                        month = 1
                     year = last_time.year + (last_time.month + timing_period) // 12
                     next_time = datetime(year, month, day, hour, minute, second)
             elif timing_type == ScheduleTimingType.YEAR:
