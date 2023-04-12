@@ -1,5 +1,5 @@
 import logging
-
+import os
 
 logger = logging.getLogger(__name__)
 handler = logging.StreamHandler()
@@ -9,4 +9,4 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 
-HOST = 'http://127.0.0.1:8000'
+HOST = os.environ.get('DJANGO_SERVER_ADDRESS', 'http://127.0.0.1:8000')

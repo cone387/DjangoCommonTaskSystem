@@ -24,21 +24,26 @@ def start_by_server(log_file=None, **kwargs):
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
+    for k, v in os.environ.items():
+        logger.info('Env: %s -> %s' % (k, v))
+
     start_client(**kwargs)
 
 
 if __name__ == '__main__':
     import django
     parser = argparse.ArgumentParser()
-    parser.add_argument('--system-path', type=str, required=True)
+    parser.add_argument('--system-path', type=str, required=False)
     parser.add_argument('--system-setting', type=str, required=False)
     shell_args = parser.parse_args()
-    sys.path.append(shell_args.system_path)
+    if shell_args.system_path:
+        assert os.path.exists(shell_args.system_path), 'system path not found'
+        sys.path.append(shell_args.system_path)
     env = shell_args.system_setting or os.environ.get('DJANGO_SETTINGS_MODULE')
     assert env, 'django settings module not found'
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', env)
     os.environ['RUN_CLIENT'] = 'true'
     django.setup()
 
-    from system_task_execution.executor import start_client
+    from django_common_task_system.system_task_execution.system_task_execution.executor import start_client
     start_client()
