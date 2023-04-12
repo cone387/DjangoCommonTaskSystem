@@ -18,8 +18,6 @@ def init_system_process():
     models.SystemProcess.objects.all().delete()
     name = 'system-process-default'
     log_file = os.path.join(logs_path, f'{name}.log')
-    if os.path.isfile(log_file):
-        os.remove(log_file)
     instance = models.SystemProcess(
         process_name=name,
         log_file=log_file
