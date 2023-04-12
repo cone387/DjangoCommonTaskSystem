@@ -1,6 +1,8 @@
 from .base import BaseExecutor
 from django.db import connection
 from django.shortcuts import reverse
+from .. import settings
+from urllib.parse import urljoin
 from django_common_task_system.system_task.models import builtins
 import requests
 
@@ -28,6 +30,5 @@ class SqlProduceExecutor(BaseExecutor):
 
     def execute(self):
         url = reverse('system_schedule_produce', args=(self.schedule.id,))
-        host = self.schedule.task.config.get('host', 'http://127.0.0.1:8000')
-        res = requests.post(host + url)
+        res = requests.post(urljoin(settings.HOST, url))
         return res.json()

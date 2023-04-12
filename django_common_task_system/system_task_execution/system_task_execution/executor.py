@@ -1,4 +1,4 @@
-
+import os
 import time
 import copy
 import requests
@@ -7,6 +7,7 @@ from datetime import datetime
 from django.urls import reverse
 from .executors import Executors
 from . import settings
+from urllib.parse import urljoin
 from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins
 from django_common_task_system.models import TaskScheduleCallback
 from django_common_task_system.choices import TaskScheduleStatus
@@ -27,7 +28,7 @@ def query_system_schedule():
 
 def request_system_schedule():
 
-    url = settings.HOST + reverse('system_schedule_queue_get', args=('system', ))
+    url = urljoin(settings.HOST, reverse('system_schedule_queue_get', args=('system', )))
     response = requests.get(url)
     if response.status_code == 200:
         result = response.json()
@@ -82,6 +83,8 @@ def run():
 
 def start_client(**kwargs):
     logger.info('system executor start')
+    for k, v in os.environ.items():
+        logger.info('Env: %s -> %s' % (k, v))
     while True:
         try:
             run()

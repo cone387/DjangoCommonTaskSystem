@@ -40,7 +40,7 @@ if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'tru
 @receiver(post_delete, sender=models.SystemProcess)
 def delete_process(sender, instance: models.SystemProcess, **kwargs):
     ProcessManager.kill(instance.process_id)
-    if os.path.isfile(instance.log_file):
+    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
         os.remove(instance.log_file)
 
 

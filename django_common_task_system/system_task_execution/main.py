@@ -24,9 +24,6 @@ def start_by_server(log_file=None, **kwargs):
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-    for k, v in os.environ.items():
-        logger.info('Env: %s -> %s' % (k, v))
-
     start_client(**kwargs)
 
 
