@@ -4,6 +4,7 @@ import os
 import time
 from .process import ProcessManager
 from ..system_task_execution.main import start_by_server
+from django_common_task_system.forms import TaskScheduleProducerForm, TaskScheduleQueueForm
 
 
 class SystemTaskForm(forms.ModelForm):
@@ -90,3 +91,15 @@ class SystemProcessForm(forms.ModelForm):
     class Meta:
         model = models.SystemProcess
         fields = '__all__'
+
+
+class SystemScheduleQueueForm(TaskScheduleQueueForm):
+
+    class Meta(TaskScheduleQueueForm.Meta):
+        model = models.SystemScheduleQueue
+
+
+class SystemScheduleProducerForm(TaskScheduleProducerForm):
+
+    class Meta(TaskScheduleProducerForm.Meta):
+        model = models.SystemScheduleProducer

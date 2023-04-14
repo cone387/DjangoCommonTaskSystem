@@ -73,7 +73,8 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
 
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
-    schedule_put_name = 'system_schedule_queue_put'
+    queues = models.builtins.queues
+    schedule_put_name = 'system_schedule_put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'put', 'logs', 'update_time')
     list_filter = ('task__category', )
@@ -86,23 +87,6 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
 
 class SystemScheduleLogAdmin(base_admin.TaskScheduleLogAdmin):
     schedule_retry_name = 'system_schedule_retry'
-
-
-class SystemScheduleQueueAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'code', 'queue_url', 'module', 'update_time')
-
-    fields = (
-        ('code', 'module', 'status'),
-        'name',
-    )
-
-    def queue_url(self, obj):
-        url = reverse('system_schedule_queue_get', args=(obj.code,))
-        return format_html(
-            '<a href="%s" target="_blank">%s</a>' % (url, url)
-        )
-    queue_url.allow_tags = True
-    queue_url.short_description = '队列地址'
 
 
 class SystemProcessAdmin(admin.ModelAdmin):
@@ -137,10 +121,22 @@ class SystemProcessAdmin(admin.ModelAdmin):
         return False
 
 
+class SystemScheduleQueueAdmin(base_admin.TaskScheduleQueueAdmin):
+    form = forms.SystemScheduleQueueForm
+    builtins = models.builtins
+    schedule_get_name = 'system_schedule_get'
+
+
+class SystemScheduleProducerAdmin(base_admin.TaskScheduleProducerAdmin):
+    form = forms.SystemScheduleProducerForm
+    schedule_get_name = 'system_schedule_get'
+
+
 admin.site.register(models.SystemTask, SystemTaskAdmin)
 admin.site.register(models.SystemScheduleCallback, SystemScheduleCallbackAdmin)
 admin.site.register(models.SystemSchedule, SystemScheduleAdmin)
 admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
 admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
+admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
 admin.site.register(models.SystemProcess, SystemProcessAdmin)
 

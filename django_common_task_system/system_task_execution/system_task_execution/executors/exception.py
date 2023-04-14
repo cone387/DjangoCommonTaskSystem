@@ -25,29 +25,36 @@ class SystemExceptionExecutor(BaseExecutor):
     name = builtins.tasks.system_exception_handling.name
     schedule_model = SystemSchedule
     schedule_log_model = SystemScheduleLog
-    handle_url = 'system_schedule_queue_put'
+    handle_url = 'system_schedule_put'
 
     def execute(self):
         max_retry_times = self.schedule.task.config.get('max_retry_times', 5)
-        columns = get_schedule_table_columns(table=self.schedule_model._meta.db_table)
+        max_fetch_num = self.schedule.task.config.get('max_fetch_num', 1000)
+        # columns = get_schedule_table_columns(table=self.schedule_model._meta.db_table)
         command = '''
-            select %s, b.schedule_time as next_schedule_time from %s a join (
-            select schedule_id, schedule_time, count(*) as times, status from %s where create_time > CURDATE() 
-            GROUP BY schedule_id, schedule_time order by schedule_id, schedule_time
-            ) b on a.id = b.schedule_id where times < %s limit 1000
-        ''' % (',a.'.join(columns), self.schedule_model._meta.db_table,
-               self.schedule_log_model._meta.db_table, max_retry_times)
-        schedules = self.schedule_model.objects.raw(command)
-        path = reverse(self.handle_url, args=(self.schedule.id,))
-        url = settings.HOST + path
-        result = {}
-        for schedule in schedules:
-            try:
-                res = requests.get(url)
-                result[schedule.id] = res.status_code
-            except Exception as e:
-                result[schedule.id] = str(e)
-        return result
+            select * from (
+            select queue, schedule_id, schedule_time, count(*) as times from %s where create_time > CURDATE() 
+            and status != 'S' 
+            GROUP BY queue, schedule_id, schedule_time order by schedule_id, schedule_time
+            ) where times < %s limit %s
+        ''' % (self.schedule_log_model._meta.db_table, max_retry_times, max_fetch_num)
+        with connection.cursor() as cursor:
+            cursor.execute(command)
+            rows = cursor.fetchall()
+        if rows:
+            path = reverse(self.handle_url)
+            ids, queues, times = [], [], []
+            for q, i, t, _ in rows:
+                ids.append(str(i))
+                queues.append(q)
+                times.append(t.strftime('%Y-%m-%d %H:%M:%S'))
+            url = settings.HOST + path
+            return requests.get(url, params={
+                'i': ','.join(ids),
+                'q': ','.join(queues),
+                't': ','.join(times)
+            }).json()
+        return "no schedule need to retry"
 
 
 class ScheduleExceptionExecutor(SystemExceptionExecutor):

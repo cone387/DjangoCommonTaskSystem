@@ -2,20 +2,14 @@ from django.db import models
 from django.conf import settings
 from django.utils.module_loading import import_string
 
+from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus
 from django_common_task_system.models import AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, \
-    TaskScheduleLog, AbstractScheduleCallback
-from .choices import ScheduleQueueModule
+    TaskScheduleLog, AbstractScheduleCallback, \
+    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, BaseBuiltinQueues
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
-
-
-def code_validator(value):
-    import re
-    from django.core.validators import ValidationError
-    if re.match(r'[a-zA-Z_-]+', value) is None:
-        raise ValidationError('编码只能包含字母、数字、下划线和中划线')
 
 
 class SystemTask(AbstractTask):
@@ -33,24 +27,12 @@ class SystemTask(AbstractTask):
         super().save(force_insert, force_update, using, update_fields)
 
 
-class SystemScheduleQueue(models.Model):
-    id = models.AutoField(primary_key=True, verbose_name='ID')
-    name = models.CharField(max_length=100, verbose_name='队列名称', unique=True)
-    code = models.CharField(max_length=100, verbose_name='队列编码', unique=True, validators=[code_validator])
-    status = models.BooleanField(default=True, verbose_name='状态')
-    module = models.CharField(max_length=100, verbose_name='队列类型',
-                              default=ScheduleQueueModule.QUEUE,
-                              choices=ScheduleQueueModule.choices)
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+class SystemScheduleQueue(AbstractTaskScheduleQueue):
 
-    class Meta:
+    class Meta(AbstractTaskScheduleQueue.Meta):
         db_table = 'system_schedule_queue'
         verbose_name = verbose_name_plural = '系统队列'
         abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
-
-    def __str__(self):
-        return "%s(%s)" % (self.name, self.code)
 
 
 class SystemScheduleCallback(AbstractScheduleCallback):
@@ -73,6 +55,16 @@ class SystemSchedule(AbstractTaskSchedule):
         db_table = 'system_schedule'
         verbose_name = verbose_name_plural = '系统计划'
         ordering = ('-update_time',)
+        abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
+
+
+class SystemScheduleProducer(AbstractTaskScheduleProducer):
+    queue = models.ForeignKey(SystemScheduleQueue, db_constraint=False, related_name='producers',
+                              on_delete=models.CASCADE, verbose_name='队列')
+
+    class Meta(AbstractTaskScheduleProducer.Meta):
+        db_table = 'system_schedule_producer'
+        verbose_name = verbose_name_plural = '计划生产'
         abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
 
 
@@ -105,19 +97,55 @@ class SystemProcess(models.Model):
         return "%s(%s)" % (self.process_name, self.process_id)
 
 
-class BuiltinQueues(dict):
+class BuiltinQueues(BaseBuiltinQueues):
+    model = SystemScheduleQueue
 
     def __init__(self):
-        super(BuiltinQueues, self).__init__()
-        self.system_task_instance: SystemScheduleQueue = SystemScheduleQueue.objects.get_or_create(
-            code='system', defaults={'name': '系统任务队列'})[0]
-        self.system_test_instance: SystemScheduleQueue = SystemScheduleQueue.objects.get_or_create(
-            code='test', defaults={'name': '测试测试队列'})[0]
-        for q in SystemScheduleQueue.objects.filter(status=True):
-            self[q.code] = import_string(q.module)()
+        self.opening: SystemScheduleQueue = self.model.objects.get_or_create(
+            code=self.status_params_mapping[TaskScheduleStatus.OPENING.value],
+            defaults={
+                'status': True,
+                'module': ScheduleQueueModule.QUEUE.value,
+                'name': '系统任务队列'
+            }
+        )[0]
 
-        self.system_task_queue = self[self.system_task_instance.code]
-        self.system_test_queue = self[self.system_test_instance.code]
+        self.test = self.model.objects.get_or_create(
+            code=self.status_params_mapping[TaskScheduleStatus.TEST.value],
+            defaults={
+                'status': True,
+                'module': ScheduleQueueModule.QUEUE.value,
+                'name': '测试任务队列'
+            }
+        )[0]
+        super(BuiltinQueues, self).__init__()
+
+
+class BuiltinProducers:
+
+    def __init__(self, queues: BuiltinQueues):
+        self.opening = SystemScheduleProducer.objects.get_or_create(
+            queue=queues.opening,
+            lte_now=True,
+            defaults={
+                'filters': {
+                    'status': TaskScheduleStatus.OPENING.value,
+                },
+                'status': True,
+                'name': '默认'
+            }
+        )[0]
+        self.test = SystemScheduleProducer.objects.get_or_create(
+            queue=queues.test,
+            lte_now=True,
+            defaults={
+                'filters': {
+                    'status': TaskScheduleStatus.TEST.value,
+                },
+                'status': True,
+                'name': '测试'
+            }
+        )[0]
 
 
 class BuiltinTasks:
@@ -244,7 +272,7 @@ class BuiltinTasks:
             category=self.system_test_category,
             config={
                 'sql': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table,
-                'queue': queues.system_test_instance.code
+                'queue': queues.test.code
             },
             user=user
         )[0]
@@ -364,17 +392,19 @@ class Builtins:
         self._tasks = None
         self._schedules = None
         self._queues = None
+        self._producers = None
 
     def initialize(self):
         if not self._initialized:
-            print('初始化内置任务')
+            print('初始化系统内置任务')
             self._initialized = True
             user = User.objects.filter(is_superuser=True).order_by('id').first()
             if not user:
                 raise Exception('未找到超级管理员')
             self._queues = BuiltinQueues()
-            self._tasks = BuiltinTasks(user, self.queues)
-            self._schedules = BuiltinSchedules(user, self.tasks)
+            self._producers = BuiltinProducers(self._queues)
+            self._tasks = BuiltinTasks(user, self._queues)
+            self._schedules = BuiltinSchedules(user, self._tasks)
 
     @property
     def tasks(self) -> BuiltinTasks:
@@ -390,6 +420,11 @@ class Builtins:
     def queues(self) -> BuiltinQueues:
         self.initialize()
         return self._queues
+
+    @property
+    def producers(self) -> BuiltinProducers:
+        self.initialize()
+        return self._producers
 
 
 builtins = Builtins()

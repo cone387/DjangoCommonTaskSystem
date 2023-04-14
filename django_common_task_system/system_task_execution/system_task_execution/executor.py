@@ -28,7 +28,7 @@ def query_system_schedule():
 
 def request_system_schedule():
 
-    url = urljoin(settings.HOST, reverse('system_schedule_queue_get', args=('system', )))
+    url = urljoin(settings.HOST, reverse('system_schedule_get', args=('opening', )))
     response = requests.get(url)
     if response.status_code == 200:
         result = response.json()
@@ -39,24 +39,30 @@ def request_system_schedule():
         category = task.pop('category')
         tags = task.pop('tags', None)
         user = result.pop('user', None)
+        queue = result.pop('queue', None)
         result['next_schedule_time'] = datetime.strptime(result.pop('schedule_time'), '%Y-%m-%d %H:%M:%S')
-        schedule = SystemSchedule(
+        return SystemSchedule(
             task=SystemTask(**task),
             callback=callback,
             **result
         )
-        system_task_queue.put(schedule)
+        # system_task_queue.put(schedule)
 
 
 def get_system_schedule():
-    try:
-        return system_task_queue.get(timeout=2)
-    except Empty:
-        logger.debug('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
-        query_system_schedule()
-        if system_task_queue.empty():
-            request_system_schedule()
-    return get_system_schedule()
+    while True:
+        schedule = request_system_schedule()
+        if schedule:
+            return schedule
+        time.sleep(1)
+    # try:
+    #     return system_task_queue.get(timeout=2)
+    # except Empty:
+    #     logger.debug('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
+    #     query_system_schedule()
+    #     if system_task_queue.empty():
+    #         request_system_schedule()
+    # return get_system_schedule()
 
 
 def get_schedule_executor(schedule):

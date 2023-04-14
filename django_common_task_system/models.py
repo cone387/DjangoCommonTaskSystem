@@ -2,8 +2,10 @@ from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import models
+from django.utils.module_loading import import_string
+
 from .choices import TaskStatus, TaskScheduleStatus, TaskScheduleType, TaskCallbackStatus, \
-    TaskCallbackEvent, ScheduleTimingType
+    TaskCallbackEvent, ScheduleTimingType, ScheduleQueueModule
 from django_common_objects.models import CommonTag, CommonCategory, get_default_config
 from django_common_objects import fields as common_fields
 from .utils.cron_utils import get_next_cron_time
@@ -14,12 +16,19 @@ from django.forms import ValidationError
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
 from . import settings
+import re
+from django.core.validators import ValidationError
 
 
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 
 UserModel = get_user_model()
+
+
+def code_validator(value):
+    if re.match(r'[a-zA-Z_-]+', value) is None:
+        raise ValidationError('编码只能包含字母、数字、下划线和中划线')
 
 
 class AbstractTask(models.Model):
@@ -445,10 +454,62 @@ class TaskSchedule(AbstractTaskSchedule):
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
+class AbstractTaskScheduleQueue(models.Model):
+    id = models.AutoField(primary_key=True, verbose_name='ID')
+    name = models.CharField(max_length=100, verbose_name='队列名称', unique=True)
+    code = models.CharField(max_length=100, verbose_name='队列编码', unique=True, validators=[code_validator])
+    status = models.BooleanField(default=True, verbose_name='状态')
+    module = models.CharField(max_length=100, verbose_name='队列类型',
+                              default=ScheduleQueueModule.QUEUE,
+                              choices=ScheduleQueueModule.choices)
+    config = models.JSONField(default=dict, verbose_name='配置', null=True, blank=True)
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = verbose_name_plural = '任务队列'
+        abstract = True
+
+    def __str__(self):
+        return "%s(%s)" % (self.name, self.code)
+
+
+class TaskScheduleQueue(AbstractTaskScheduleQueue):
+    class Meta(AbstractTaskScheduleQueue.Meta):
+        db_table = 'task_schedule_queue'
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+
+
+class AbstractTaskScheduleProducer(models.Model):
+    id = models.AutoField(primary_key=True, verbose_name='ID')
+    name = models.CharField(max_length=100, verbose_name='生产名称')
+    filters = models.JSONField(verbose_name='过滤器')
+    lte_now = models.BooleanField(default=True, verbose_name='小于等于当前时间')
+    queue = models.ForeignKey(TaskScheduleQueue, db_constraint=False, related_name='producers',
+                              on_delete=models.CASCADE, verbose_name='队列')
+    status = models.BooleanField(default=True, verbose_name='启用状态')
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = verbose_name_plural = '计划生产'
+        abstract = True
+
+    def __str__(self):
+        return self.name
+
+
+class TaskScheduleProducer(AbstractTaskScheduleProducer):
+    class Meta(AbstractTaskScheduleProducer.Meta):
+        db_table = 'task_schedule_producer'
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+
+
 class AbstractTaskScheduleLog(models.Model):
     id = models.AutoField(primary_key=True)
     schedule = models.ForeignKey(TaskSchedule, db_constraint=False, on_delete=models.CASCADE, verbose_name='任务计划')
     status = common_fields.CharField(verbose_name='运行状态')
+    queue = models.CharField(max_length=100, verbose_name='队列', default='opening')
     result = common_fields.ConfigField(blank=True, null=True, verbose_name='结果')
     schedule_time = models.DateTimeField(verbose_name='计划时间')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
@@ -471,3 +532,101 @@ class TaskScheduleLog(AbstractTaskScheduleLog):
     class Meta(AbstractTaskScheduleLog.Meta):
         swappable = 'TASK_SCHEDULE_LOG_MODEL'
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+
+
+class BaseBuiltinQueues(dict):
+    model = TaskScheduleQueue
+    status_params_mapping = {
+        TaskScheduleStatus.OPENING.value: 'opening',
+        TaskScheduleStatus.CLOSED.value: 'closed',
+        TaskScheduleStatus.TEST.value: 'test',
+        TaskScheduleStatus.DONE.value: 'done',
+        TaskScheduleStatus.ERROR.value: 'error',
+    }
+
+    def __init__(self):
+        super(BaseBuiltinQueues, self).__init__()
+        for m in self.model.objects.filter(status=True):
+            self.add(m)
+
+    def add(self, instance: AbstractTaskScheduleQueue):
+        if instance.status and instance.code not in self:
+            instance.queue = import_string(instance.module)(**instance.config)
+            self[instance.code] = instance
+        elif not instance.status:
+            self.pop(instance.code, None)
+
+    def delete(self, instance: AbstractTaskScheduleQueue):
+        self.pop(instance.code, None)
+
+
+class BuiltinQueues(BaseBuiltinQueues):
+    def __init__(self):
+        self.opening = self.model.objects.get_or_create(
+            code=self.status_params_mapping[TaskScheduleStatus.OPENING.value],
+            defaults={
+                'status': True,
+                'module': ScheduleQueueModule.QUEUE.value,
+                'name': '已启用任务'
+            }
+        )[0]
+        self.test = self.model.objects.get_or_create(
+            code=self.status_params_mapping[TaskScheduleStatus.TEST.value],
+            defaults={
+                'status': True,
+                'module': ScheduleQueueModule.QUEUE.value,
+                'name': '测试任务'
+            }
+        )[0]
+        super(BuiltinQueues, self).__init__()
+
+
+class BuiltinProducers:
+
+    def __init__(self, queues: BuiltinQueues):
+        self.opening = TaskScheduleProducer.objects.get_or_create(
+            queue=queues.opening,
+            lte_now=True,
+            defaults={
+                'filters': {
+                    'status': TaskScheduleStatus.OPENING.value,
+                },
+                'status': True,
+                'name': '默认'
+            }
+        )[0]
+
+        self.test = TaskScheduleProducer.objects.get_or_create(
+            queue=queues.test,
+            lte_now=True,
+            defaults={
+                'filters': {
+                    'status': TaskScheduleStatus.TEST.value,
+                },
+                'status': True,
+                'name': '测试'
+            }
+        )[0]
+
+
+class Builtins:
+
+    def __init__(self):
+        self._initialized = False
+        self._queues = None
+        self._producers = None
+
+    def initialize(self):
+        if not self._initialized:
+            print('初始化内置任务')
+            self._initialized = True
+            self._queues = BuiltinQueues()
+            self._producers = BuiltinProducers(self._queues)
+
+    @property
+    def queues(self) -> BuiltinQueues:
+        self.initialize()
+        return self._queues
+
+
+builtins = Builtins()

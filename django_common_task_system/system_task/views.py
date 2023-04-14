@@ -1,43 +1,41 @@
-from datetime import datetime
 from django.dispatch import receiver
-from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.request import Request
 from rest_framework import status
-from django.utils.module_loading import import_string
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
-from django_common_task_system import serializers
-from django_common_task_system.choices import TaskScheduleStatus
 from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, \
-    SystemScheduleLog, SystemProcess
+    SystemProcess, SystemScheduleProducer, SystemScheduleLog
+from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread
 from .models import builtins
-from queue import Empty
-from threading import Lock
 import os
 
 
-schedule_queue_lock = Lock()
-# 后面可以改用类重写，然后可以自定义配置使用什么队列，比如redis
+class SystemScheduleThread(TaskScheduleThread):
+    schedule_model = SystemSchedule
+    producer = SystemScheduleProducer
+    queues = builtins.queues
 
 
-def get_schedule_queue(schedule: SystemSchedule):
-    return builtins.queues.system_task_queue
+if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
+    from django.conf import settings
+
+    if 'django_common_task_system.system_task' in settings.INSTALLED_APPS:
+        builtins.initialize()
+        thread = SystemScheduleThread()
+        thread.start()
 
 
 @receiver(post_delete, sender=SystemScheduleQueue)
 def delete_queue(sender, instance: SystemScheduleQueue, **kwargs):
-    builtins.queues.system_task_queue.pop(instance.code, None)
+    builtins.queues.delete(instance.code)
 
 
 @receiver(post_save, sender=SystemScheduleQueue)
 def add_queue(sender, instance: SystemScheduleQueue, created, **kwargs):
-    if instance.status and instance.code not in builtins.queues:
-        builtins.queues[instance.code] = import_string(instance.module)()
-    elif not instance.status:
-        builtins.queues.pop(instance.code, None)
+    builtins.queues.add(instance.code)
 
 
 class ScheduleProduceView(APIView):
@@ -73,74 +71,11 @@ class ScheduleProduceView(APIView):
         return Response({'message': '成功产生%s条数据' % nums})
 
 
-class SystemScheduleQueueAPI:
+class SystemScheduleQueueAPI(TaskScheduleQueueAPI):
 
-    @staticmethod
-    def query_system_schedules():
-        now = datetime.now()
-        queue = builtins.queues.system_task_queue
-        queryset = SystemSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
-        for schedule in queryset:
-            queue.put(serializers.QueueScheduleSerializer(schedule).data)
-            schedule.generate_next_schedule()
-        return queryset
-
-    @staticmethod
-    @api_view(['GET'])
-    def get(request: Request, code: str):
-        queue = builtins.queues.get(code, None)
-        if queue is None:
-            return Response({'message': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            task = queue.get_nowait()
-        except Empty:
-            if code == builtins.queues.system_task_instance.code:
-                if schedule_queue_lock.acquire(blocking=False):
-                    try:
-                        SystemScheduleQueueAPI.query_system_schedules()
-                    except Exception as e:
-                        return Response({'error': '查询任务失败: %s' % e}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-                    finally:
-                        schedule_queue_lock.release()
-            return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_204_NO_CONTENT)
-        return Response(task)
-
-    @staticmethod
-    @api_view(['GET'])
-    def retry(request: Request, pk: int):
-        try:
-            # 重试失败的任务, 这里的pk应该是schedule_log的id，schedule是会变的
-            log = SystemScheduleLog.objects.get(id=pk)
-        except SystemScheduleLog.DoesNotExist:
-            return Response({'error': 'sys_schedule_log_id(%s)不存在, 重试失败' % pk}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            queue = get_schedule_queue(log.schedule)
-            queue.put(serializers.QueueScheduleSerializer(log.schedule).data)
-            return Response({'message': '成功添加到重试队列'})
-        except Exception as e:
-            return Response({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
-
-    @staticmethod
-    @api_view(['GET'])
-    def put(request: Request, pk: int):
-        try:
-            schedule = SystemSchedule.objects.get(id=pk)
-        except SystemSchedule.DoesNotExist:
-            return Response({'error': 'sys_schedule_id(%s)不存在, 重试失败' % pk}, status=status.HTTP_404_NOT_FOUND)
-        try:
-            queue = get_schedule_queue(schedule)
-            queue.put(serializers.QueueScheduleSerializer(schedule).data)
-            return Response({'message': '成功添加到队列'})
-        except Exception as e:
-            return Response({'error': '添加到队列失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
-
-    @staticmethod
-    @api_view(['GET'])
-    def status(request: Request):
-        data = {
-            k: v.qsize() for k, v in builtins.queues.items()
-        }
-        return Response(data)
+    queues = builtins.queues
+    schedule_model = SystemSchedule
+    log_model = SystemScheduleLog
 
 
 class SystemProcessView:

@@ -1,6 +1,8 @@
 from django import forms
 from django.contrib.admin import widgets
-from .choices import TaskScheduleType, ScheduleTimingType
+from django.utils.module_loading import import_string
+
+from .choices import TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus
 from django_common_objects.widgets import JSONWidget
 from .utils import foreign_key
 from datetime import datetime, time as datetime_time
@@ -327,3 +329,64 @@ class TaskScheduleForm(forms.ModelForm):
     class Meta:
         model = models.TaskSchedule
         fields = "__all__"
+
+
+class TaskScheduleQueueForm(forms.ModelForm):
+
+    def clean(self):
+        cleaned_data = super(TaskScheduleQueueForm, self).clean()
+        if not self.errors:
+            module = cleaned_data.get('module')
+            config = cleaned_data.get('config')
+            config.setdefault('name', 'SYSTEM_TASK_QUEUE:%s' % cleaned_data['code'])
+            queueCls = import_string(module)
+            validate_config = getattr(queueCls, 'validate_config', None)
+            if validate_config:
+                error = validate_config(config)
+                if error:
+                    self.add_error('config', error)
+            if not self.errors:
+                queue = queueCls(**config)
+                validate = getattr(queue, 'validate', None)
+                if validate:
+                    error = validate()
+                    if error:
+                        self.add_error('config', error)
+        return cleaned_data
+
+    class Meta:
+        model = models.TaskScheduleQueue
+        fields = '__all__'
+
+
+class TaskScheduleProducerForm(forms.ModelForm):
+    name = forms.CharField(max_length=100, label='名称', required=False)
+
+    def __init__(self, *args, **kwargs):
+        super(TaskScheduleProducerForm, self).__init__(*args, **kwargs)
+        if not self.instance.id:
+            self. initial['filters'] = {
+                'status': TaskScheduleStatus.OPENING.value,
+                'task__status': TaskStatus.ENABLE.value,
+            }
+
+    def clean(self):
+        cleaned_data = super(TaskScheduleProducerForm, self).clean()
+        if not self.errors:
+            filters = cleaned_data.get('filters')
+            if not filters:
+                self.add_error('filters', 'filters不能为空')
+            else:
+                try:
+                    models.TaskSchedule.objects.filter(**filters).first()
+                except Exception as e:
+                    self.add_error('filters', 'filters参数错误: %s' % e)
+                else:
+                    name = cleaned_data.get('name')
+                    if not name:
+                        cleaned_data['name'] = "队列(%s)生产者" % cleaned_data.get('queue').name
+        return cleaned_data
+
+    class Meta:
+        model = models.TaskScheduleProducer
+        fields = '__all__'
