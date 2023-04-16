@@ -1,9 +1,7 @@
-from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils.module_loading import import_string
-
 from .choices import TaskStatus, TaskScheduleStatus, TaskScheduleType, TaskCallbackStatus, \
     TaskCallbackEvent, ScheduleTimingType, ScheduleQueueModule
 from django_common_objects.models import CommonTag, CommonCategory, get_default_config
@@ -17,6 +15,7 @@ from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
 from . import settings
 import re
+import os
 from django.core.validators import ValidationError
 
 
@@ -550,9 +549,11 @@ class BaseBuiltinQueues(dict):
             self.add(m)
 
     def add(self, instance: AbstractTaskScheduleQueue):
-        if instance.status and instance.code not in self:
-            instance.queue = import_string(instance.module)(**instance.config)
-            self[instance.code] = instance
+        if instance.status:
+            old = self.get(instance.code)
+            if not old or old.module != instance.module or old.config != instance.config:
+                instance.queue = import_string(instance.module)(**instance.config)
+                self[instance.code] = instance
         elif not instance.status:
             self.pop(instance.code, None)
 
@@ -581,7 +582,27 @@ class BuiltinQueues(BaseBuiltinQueues):
         super(BuiltinQueues, self).__init__()
 
 
-class BuiltinProducers:
+class BaseBuiltinProducers(dict):
+    model = TaskScheduleProducer
+
+    def __init__(self):
+        super(BaseBuiltinProducers, self).__init__()
+        for m in self.model.objects.filter(status=True):
+            self.add(m)
+
+    def add(self, instance: AbstractTaskScheduleProducer):
+        if instance.status:
+            old = self.get(instance.id)
+            if not old or old.queue != instance.queue:
+                self[instance.id] = instance
+        elif not instance.status:
+            self.pop(instance.id, None)
+
+    def delete(self, instance: AbstractTaskScheduleProducer):
+        self.pop(instance.id, None)
+
+
+class BuiltinProducers(BaseBuiltinProducers):
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = TaskScheduleProducer.objects.get_or_create(
@@ -607,6 +628,7 @@ class BuiltinProducers:
                 'name': '测试'
             }
         )[0]
+        super(BuiltinProducers, self).__init__()
 
 
 class Builtins:
@@ -618,15 +640,23 @@ class Builtins:
 
     def initialize(self):
         if not self._initialized:
-            print('初始化内置任务')
             self._initialized = True
-            self._queues = BuiltinQueues()
-            self._producers = BuiltinProducers(self._queues)
+            if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
+                from django.conf import settings
+                if 'django_common_task_system' in settings.INSTALLED_APPS:
+                    print('初始化内置任务')
+                    self._queues = BuiltinQueues()
+                    self._producers = BuiltinProducers(self._queues)
 
     @property
     def queues(self) -> BuiltinQueues:
         self.initialize()
         return self._queues
+
+    @property
+    def producers(self) -> BuiltinProducers:
+        self.initialize()
+        return self._producers
 
 
 builtins = Builtins()

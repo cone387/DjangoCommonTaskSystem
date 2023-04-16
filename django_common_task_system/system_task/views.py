@@ -15,8 +15,8 @@ import os
 
 class SystemScheduleThread(TaskScheduleThread):
     schedule_model = SystemSchedule
-    producer = SystemScheduleProducer
     queues = builtins.queues
+    producers = builtins.producers
 
 
 if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
@@ -30,12 +30,19 @@ if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'tru
 
 @receiver(post_delete, sender=SystemScheduleQueue)
 def delete_queue(sender, instance: SystemScheduleQueue, **kwargs):
-    builtins.queues.delete(instance.code)
-
+    builtins.queues.delete(instance)
 
 @receiver(post_save, sender=SystemScheduleQueue)
 def add_queue(sender, instance: SystemScheduleQueue, created, **kwargs):
-    builtins.queues.add(instance.code)
+    builtins.queues.add(instance)
+
+@receiver(post_delete, sender=SystemScheduleProducer)
+def delete_producer(sender, instance: SystemScheduleProducer, **kwargs):
+    builtins.producers.delete(instance)
+
+@receiver(post_save, sender=SystemScheduleProducer)
+def add_producer(sender, instance: SystemScheduleProducer, created, **kwargs):
+    builtins.producers.add(instance)
 
 
 class ScheduleProduceView(APIView):
@@ -51,7 +58,7 @@ class ScheduleProduceView(APIView):
         if not sql.startswith('select'):
             return Response({'message': 'sql语句必须以select开头'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            queue = builtins.queues[schedule.task.config['queue']]
+            queue = builtins.queues[schedule.task.config['queue']].queue
             max_size = schedule.task.config.get('max_size', 10000)
             if queue.qsize() > max_size:
                 return Response({'message': '队列(%s)已满(%s)' % (schedule.task.config['queue'], max_size)},

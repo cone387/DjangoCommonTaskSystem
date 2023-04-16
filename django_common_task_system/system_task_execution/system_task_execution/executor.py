@@ -40,12 +40,19 @@ def request_system_schedule():
         tags = task.pop('tags', None)
         user = result.pop('user', None)
         queue = result.pop('queue', None)
+        parent = task.pop('parent', None)
+        if parent:
+            parent.pop('category')
+            parent.pop('tags')
+            parent = SystemTask(**parent)
         result['next_schedule_time'] = datetime.strptime(result.pop('schedule_time'), '%Y-%m-%d %H:%M:%S')
-        return SystemSchedule(
-            task=SystemTask(**task),
+        schedule = SystemSchedule(
+            task=SystemTask(parent=parent, **task),
             callback=callback,
             **result
         )
+        schedule.queue = queue
+        return schedule
         # system_task_queue.put(schedule)
 
 

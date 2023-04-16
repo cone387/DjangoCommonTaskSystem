@@ -26,16 +26,19 @@ ScheduleModel = get_task_schedule_model()
 
 class TaskScheduleThread(Thread):
     schedule_model = ScheduleModel
-    producer = TaskScheduleProducer
-    serializer = serializers.QueueScheduleSerializer
+    producers = builtins.producers
     queues = builtins.queues
+    serializer = serializers.QueueScheduleSerializer
 
     def __init__(self):
         super().__init__(daemon=True)
 
     def produce(self):
-        for producer in self.producer.objects.filter(status=True):
+        for producer in self.producers.values():
             queue = self.queues[producer.queue.code]
+            # 队列长度大于1000时不再生产, 防止内存溢出
+            if queue.queue.qsize() > 1000:
+                continue
             queryset = self.schedule_model.objects.filter(**producer.filters)
             if producer.lte_now:
                 queryset = queryset.filter(next_schedule_time__lte=datetime.now())
@@ -66,10 +69,17 @@ if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'tru
 def delete_queue(sender, instance: TaskScheduleQueue, **kwargs):
     builtins.queues.delete(instance)
 
-
 @receiver(post_save, sender=TaskScheduleQueue)
 def add_queue(sender, instance: TaskScheduleQueue, created, **kwargs):
     builtins.queues.add(instance)
+
+@receiver(post_save, sender=TaskScheduleProducer)
+def add_producer(sender, instance: TaskScheduleProducer, created, **kwargs):
+    builtins.producers.add(instance)
+
+@receiver(post_delete, sender=TaskScheduleProducer)
+def delete_producer(sender, instance: TaskScheduleProducer, **kwargs):
+    builtins.producers.delete(instance)
 
 
 class TaskListView(UserListAPIView):

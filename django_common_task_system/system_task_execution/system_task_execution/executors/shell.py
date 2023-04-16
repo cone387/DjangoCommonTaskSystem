@@ -13,10 +13,10 @@ class ShellExecutor(BaseExecutor):
 
         commands = self.schedule.task.config.get('shell', '').split(';')
         filename = '/tmp/shell_executor.sh'
-        with open('filename', 'w') as f:
+        with open(filename, 'w') as f:
             f.write('#!/bin/bash -e \n')
             f.write('; \n'.join(commands))
-        p = subprocess.Popen(['/bin/bash', filename], shell=True, stdout=subprocess.PIPE)
+        p = subprocess.Popen(f'/bin/bash {filename}', shell=True, stdout=subprocess.PIPE)
         out, err = p.communicate()
         if err:
             raise RuntimeError(err)

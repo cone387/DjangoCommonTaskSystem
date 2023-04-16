@@ -12,7 +12,7 @@ class BaseExecutor(object):
 
     def start(self):
         log = SystemScheduleLog(schedule=self.schedule, result={},
-                                status='S',
+                                status='S', queue=self.schedule.queue,
                                 schedule_time=self.schedule.next_schedule_time)
         err = None
         try:

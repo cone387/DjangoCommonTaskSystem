@@ -1,13 +1,12 @@
 from django.db import models
 from django.conf import settings
-from django.utils.module_loading import import_string
-
 from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus
 from django_common_task_system.models import AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, \
     TaskScheduleLog, AbstractScheduleCallback, \
-    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, BaseBuiltinQueues
+    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, BaseBuiltinQueues, BaseBuiltinProducers
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
+import os
 
 User = get_user_model()
 
@@ -121,7 +120,7 @@ class BuiltinQueues(BaseBuiltinQueues):
         super(BuiltinQueues, self).__init__()
 
 
-class BuiltinProducers:
+class BuiltinProducers(BaseBuiltinProducers):
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = SystemScheduleProducer.objects.get_or_create(
@@ -146,6 +145,7 @@ class BuiltinProducers:
                 'name': '测试'
             }
         )[0]
+        super(BuiltinProducers, self).__init__()
 
 
 class BuiltinTasks:
@@ -372,7 +372,6 @@ class BuiltinSchedules:
             user=user,
             defaults=defaults
         )[0]
-
         self.test_sql_produce = SystemSchedule.objects.get_or_create(
             task=tasks.test_sql_produce,
             user=user,
@@ -396,15 +395,18 @@ class Builtins:
 
     def initialize(self):
         if not self._initialized:
-            print('初始化系统内置任务')
-            self._initialized = True
-            user = User.objects.filter(is_superuser=True).order_by('id').first()
-            if not user:
-                raise Exception('未找到超级管理员')
-            self._queues = BuiltinQueues()
-            self._producers = BuiltinProducers(self._queues)
-            self._tasks = BuiltinTasks(user, self._queues)
-            self._schedules = BuiltinSchedules(user, self._tasks)
+            if os.environ.get('RUN_MAIN') == 'true':# and os.environ.get('RUN_CLIENT') != 'true':
+                self._initialized = True
+                from django.conf import settings
+                if 'django_common_task_system' in settings.INSTALLED_APPS:
+                    print('初始化系统内置任务')
+                    user = User.objects.filter(is_superuser=True).order_by('id').first()
+                    if not user:
+                        raise Exception('未找到超级管理员')
+                    self._queues = BuiltinQueues()
+                    self._producers = BuiltinProducers(self._queues)
+                    self._tasks = BuiltinTasks(user, self._queues)
+                    self._schedules = BuiltinSchedules(user, self._tasks)
 
     @property
     def tasks(self) -> BuiltinTasks:

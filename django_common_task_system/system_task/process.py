@@ -1,4 +1,4 @@
-from multiprocessing import Process
+from multiprocessing import Process, set_start_method
 
 
 class _ProcessManager:
@@ -15,6 +15,7 @@ class _ProcessManager:
         return [k for k, v in self._processes.items() if v.is_alive()]
 
     def create(self, target, *args, **kwargs) -> Process:
+        set_start_method('spawn', True)
         process = Process(target=target, args=args, kwargs=kwargs, daemon=True)
         process.start()
         self._processes[process.pid] = process
