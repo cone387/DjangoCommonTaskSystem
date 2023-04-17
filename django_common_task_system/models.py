@@ -3,26 +3,46 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils.module_loading import import_string
 from .choices import TaskStatus, TaskScheduleStatus, TaskScheduleType, TaskCallbackStatus, \
-    TaskCallbackEvent, ScheduleTimingType, ScheduleQueueModule
+    TaskCallbackEvent, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
 from django_common_objects.models import CommonTag, CommonCategory, get_default_config
 from django_common_objects import fields as common_fields
 from .utils.cron_utils import get_next_cron_time
 from .utils import foreign_key
 from datetime import datetime, timedelta
 from . import fields
-from django.forms import ValidationError
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
 from . import settings
+from . permissions import ConsumerPermissionValidator
 import re
 import os
 from django.core.validators import ValidationError
+from django.dispatch import Signal, receiver
 
+builtin_initialized_signal = Signal()
 
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 
 UserModel = get_user_model()
+
+is_task_initialized = 'django_common_task_system' in settings.INSTALLED_APPS
+is_system_task_initialized = 'django_common_system_task.system_task' in settings.INSTALLED_APPS
+
+
+@receiver(builtin_initialized_signal, sender='builtin_initialized')
+def on_builtin_initialized(sender, app=None, **kwargs):
+    global is_task_initialized, is_system_task_initialized
+    if app == 'django_common_task_system':
+        is_task_initialized = True
+    elif app == 'django_common_task_system.system_task':
+        is_system_task_initialized = True
+    if is_task_initialized and is_system_task_initialized:
+        from threading import Timer
+
+        def send_signal():
+            builtin_initialized_signal.send(sender='system_initialized')
+        Timer(2, send_signal).start()
 
 
 def code_validator(value):
@@ -333,6 +353,8 @@ class ScheduleConfig:
     def get_next_time(self, last_time: datetime):
         schedule_type = self.schedule_type
         type_config = self.config[schedule_type]
+        if self.base_on_now:
+            last_time = datetime.now()
         next_time = last_time
         if schedule_type == TaskScheduleType.CONTINUOUS.value:
             while next_time <= last_time:
@@ -415,9 +437,9 @@ class AbstractTaskSchedule(models.Model):
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
-    def generate_next_schedule(self, now=None):
+    def generate_next_schedule(self):
         try:
-            self.next_schedule_time = ScheduleConfig(config=self.config).get_next_time(now or datetime.now())
+            self.next_schedule_time = ScheduleConfig(config=self.config).get_next_time(self.next_schedule_time)
         except Exception as e:
             self.status = TaskScheduleStatus.ERROR.value
             self.save(update_fields=('status',))
@@ -533,6 +555,35 @@ class TaskScheduleLog(AbstractTaskScheduleLog):
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
+class AbstractConsumerPermission(models.Model):
+    id = models.AutoField(primary_key=True, verbose_name='ID')
+    producer = models.ForeignKey(TaskScheduleProducer, db_constraint=False,
+                                 on_delete=models.CASCADE, verbose_name='生产者')
+    type = models.CharField(max_length=1, verbose_name='类型',
+                            default=ConsumerPermissionType.IP_WHITE_LIST,
+                            choices=ConsumerPermissionType.choices)
+    status = models.BooleanField(default=True, verbose_name='启用状态')
+    config = models.JSONField(default=dict, verbose_name='配置', null=True, blank=True)
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = verbose_name_plural = '消费权限'
+        unique_together = ('producer', 'status')
+        abstract = True
+
+    def __str__(self):
+        return self.producer.name
+
+    __repr__ = __str__
+
+
+class ConsumerPermission(AbstractConsumerPermission):
+    class Meta(AbstractConsumerPermission.Meta):
+        db_table = 'schedule_consumer_permission'
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+
+
 class BaseBuiltinQueues(dict):
     model = TaskScheduleQueue
     status_params_mapping = {
@@ -631,12 +682,39 @@ class BuiltinProducers(BaseBuiltinProducers):
         super(BuiltinProducers, self).__init__()
 
 
+class BaseConsumerPermissions(dict):
+    model = ConsumerPermission
+
+    def __init__(self):
+        super(BaseConsumerPermissions, self).__init__()
+        for m in self.model.objects.filter(status=True):
+            self.add(m)
+
+    def add(self, instance: AbstractConsumerPermission):
+        if instance.status:
+            old = self.get(instance.producer_id)
+            if not old or old.type != instance.type or old.config != instance.config:
+                validator = ConsumerPermissionValidator.get(instance.type)
+                if validator:
+                    self[instance.producer.queue.code] = validator(instance.config)
+        elif not instance.status:
+            self.pop(instance.producer.queue.code, None)
+
+    def delete(self, instance: AbstractConsumerPermission):
+        self.pop(instance.producer.queue.code, None)
+
+
+class BuiltinConsumerPermissions(BaseConsumerPermissions):
+    model = ConsumerPermission
+
+
 class Builtins:
 
     def __init__(self):
         self._initialized = False
         self._queues = None
         self._producers = None
+        self._consumer_permissions = None
 
     def initialize(self):
         if not self._initialized:
@@ -647,6 +725,8 @@ class Builtins:
                     print('初始化内置任务')
                     self._queues = BuiltinQueues()
                     self._producers = BuiltinProducers(self._queues)
+                    self._consumer_permissions = BuiltinConsumerPermissions()
+                    builtin_initialized_signal.send(sender='builtin_initialized', app='django_common_task_system')
 
     @property
     def queues(self) -> BuiltinQueues:
@@ -657,6 +737,11 @@ class Builtins:
     def producers(self) -> BuiltinProducers:
         self.initialize()
         return self._producers
+
+    @property
+    def consumer_permissions(self) -> BuiltinConsumerPermissions:
+        self.initialize()
+        return self._consumer_permissions
 
 
 builtins = Builtins()

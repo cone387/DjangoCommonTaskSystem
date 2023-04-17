@@ -2,6 +2,7 @@ from django.apps import apps as django_apps
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.commands import runserver
+from django.utils.module_loading import import_string
 
 
 class Command(runserver.Command):
@@ -27,6 +28,9 @@ if not hasattr(settings, 'TASK_SCHEDULE_MODEL'):
 
 if not hasattr(settings, 'TASK_SCHEDULE_LOG_MODEL'):
     setattr(settings, 'TASK_SCHEDULE_LOG_MODEL', 'django_common_task_system.TaskScheduleLog')
+
+if not hasattr(settings, 'TASK_SCHEDULE_SERIALIZER'):
+    setattr(settings, 'TASK_SCHEDULE_SERIALIZER', 'django_common_task_system.serializers.TaskScheduleSerializer')
 
 
 def get_task_model():
@@ -78,3 +82,10 @@ def get_schedule_log_model():
             "TASK_SCHEDULE_LOG_MODEL refers to model '%s' that has not been installed"
             % settings.SCHEDULE_LOG_MODEL
         )
+
+
+def get_task_schedule_serializer():
+    """
+    Return the User model that is active in this project.
+    """
+    return import_string(settings.TASK_SCHEDULE_SERIALIZER)

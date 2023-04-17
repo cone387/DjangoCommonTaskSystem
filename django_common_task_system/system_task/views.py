@@ -7,9 +7,10 @@ from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
 from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, \
-    SystemProcess, SystemScheduleProducer, SystemScheduleLog
+    SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission
 from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread
 from .models import builtins
+from .serializers import QueueScheduleSerializer
 import os
 
 
@@ -17,6 +18,7 @@ class SystemScheduleThread(TaskScheduleThread):
     schedule_model = SystemSchedule
     queues = builtins.queues
     producers = builtins.producers
+    serializer = QueueScheduleSerializer
 
 
 if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
@@ -32,17 +34,30 @@ if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'tru
 def delete_queue(sender, instance: SystemScheduleQueue, **kwargs):
     builtins.queues.delete(instance)
 
+
 @receiver(post_save, sender=SystemScheduleQueue)
 def add_queue(sender, instance: SystemScheduleQueue, created, **kwargs):
     builtins.queues.add(instance)
+
 
 @receiver(post_delete, sender=SystemScheduleProducer)
 def delete_producer(sender, instance: SystemScheduleProducer, **kwargs):
     builtins.producers.delete(instance)
 
+
 @receiver(post_save, sender=SystemScheduleProducer)
 def add_producer(sender, instance: SystemScheduleProducer, created, **kwargs):
     builtins.producers.add(instance)
+
+
+@receiver(post_save, sender=SystemConsumerPermission)
+def add_consumer_permission(sender, instance: SystemConsumerPermission, created, **kwargs):
+    builtins.consumer_permissions.add(instance)
+
+
+@receiver(post_delete, sender=SystemConsumerPermission)
+def delete_consumer_permission(sender, instance: SystemConsumerPermission, **kwargs):
+    builtins.consumer_permissions.delete(instance)
 
 
 class ScheduleProduceView(APIView):
@@ -81,8 +96,10 @@ class ScheduleProduceView(APIView):
 class SystemScheduleQueueAPI(TaskScheduleQueueAPI):
 
     queues = builtins.queues
+    consumer_permissions = builtins.consumer_permissions
     schedule_model = SystemSchedule
     log_model = SystemScheduleLog
+    serializer = QueueScheduleSerializer
 
 
 class SystemProcessView:

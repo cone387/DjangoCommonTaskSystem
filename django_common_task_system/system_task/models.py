@@ -1,9 +1,10 @@
 from django.db import models
 from django.conf import settings
-from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus
+from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType
 from django_common_task_system.models import AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, \
     TaskScheduleLog, AbstractScheduleCallback, \
-    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, BaseBuiltinQueues, BaseBuiltinProducers
+    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, AbstractConsumerPermission, \
+    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, builtin_initialized_signal
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
 import os
@@ -75,6 +76,15 @@ class SystemScheduleLog(AbstractTaskScheduleLog):
         db_table = 'system_schedule_log'
         verbose_name = verbose_name_plural = '系统日志'
         ordering = ('-schedule_time',)
+        abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
+
+
+class SystemConsumerPermission(AbstractConsumerPermission):
+    producer = models.ForeignKey(SystemScheduleProducer, db_constraint=False,
+                                 on_delete=models.CASCADE, verbose_name='生产者')
+
+    class Meta(AbstractConsumerPermission.Meta):
+        db_table = 'system_consumer_permission'
         abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
 
 
@@ -384,6 +394,23 @@ class BuiltinSchedules:
         )[0]
 
 
+class BuiltinConsumerPermissions(BaseConsumerPermissions):
+    model = SystemConsumerPermission
+
+    def __init__(self, producers: BuiltinProducers):
+        self.system_consumer_permission = self.model.objects.get_or_create(
+            producer=producers.opening,
+            type=ConsumerPermissionType.IP_WHITE_LIST.value,
+            defaults={
+                'status': True,
+                'config': {
+                    'ip_whitelist': ['127.0.0.1'],
+                }
+            }
+        )[0]
+        super(BuiltinConsumerPermissions, self).__init__()
+
+
 class Builtins:
 
     def __init__(self):
@@ -392,13 +419,14 @@ class Builtins:
         self._schedules = None
         self._queues = None
         self._producers = None
+        self._consumer_permissions = None
 
     def initialize(self):
         if not self._initialized:
             if os.environ.get('RUN_MAIN') == 'true':# and os.environ.get('RUN_CLIENT') != 'true':
                 self._initialized = True
                 from django.conf import settings
-                if 'django_common_task_system' in settings.INSTALLED_APPS:
+                if 'django_common_task_system.system_task' in settings.INSTALLED_APPS:
                     print('初始化系统内置任务')
                     user = User.objects.filter(is_superuser=True).order_by('id').first()
                     if not user:
@@ -407,6 +435,9 @@ class Builtins:
                     self._producers = BuiltinProducers(self._queues)
                     self._tasks = BuiltinTasks(user, self._queues)
                     self._schedules = BuiltinSchedules(user, self._tasks)
+                    self._consumer_permissions = BuiltinConsumerPermissions(self._producers)
+                    builtin_initialized_signal.send(sender='builtin_initialized',
+                                                    app='django_common_task_system.system_task')
 
     @property
     def tasks(self) -> BuiltinTasks:
@@ -427,6 +458,11 @@ class Builtins:
     def producers(self) -> BuiltinProducers:
         self.initialize()
         return self._producers
+
+    @property
+    def consumer_permissions(self) -> BuiltinConsumerPermissions:
+        self.initialize()
+        return self._consumer_permissions
 
 
 builtins = Builtins()

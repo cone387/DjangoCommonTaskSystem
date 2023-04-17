@@ -390,3 +390,23 @@ class TaskScheduleProducerForm(forms.ModelForm):
     class Meta:
         model = models.TaskScheduleProducer
         fields = '__all__'
+
+
+class ConsumerPermissionForm(forms.ModelForm):
+    config = forms.JSONField(required=False, initial={}, label="配置",
+                             widget=forms.HiddenInput())
+    ip_whitelist = forms.CharField(required=False, label="IP白名单", widget=forms.Textarea(
+        attrs={'rows': 10, 'style': 'width: 60%'}))
+
+    def __init__(self, *args, **kwargs):
+        super(ConsumerPermissionForm, self).__init__(*args, **kwargs)
+        if self.instance.id:
+            self.initial['ip_whitelist'] = '\n'.join(self.instance.config.get('ip_whitelist', []) or [])
+
+    def clean(self):
+        cleaned_data = super(ConsumerPermissionForm, self).clean()
+        if not self.errors:
+            ip_whitelist = cleaned_data.pop('ip_whitelist', "")
+            cleaned_data['config'] = {'ip_whitelist': [x.strip() for x in ip_whitelist.split('\n')]}
+        return cleaned_data
+

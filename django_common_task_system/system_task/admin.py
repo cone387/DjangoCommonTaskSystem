@@ -130,6 +130,11 @@ class SystemScheduleQueueAdmin(base_admin.TaskScheduleQueueAdmin):
 class SystemScheduleProducerAdmin(base_admin.TaskScheduleProducerAdmin):
     form = forms.SystemScheduleProducerForm
     schedule_get_name = 'system_schedule_get'
+    builtins = models.builtins
+
+
+class ConsumerPermissionAdmin(base_admin.ConsumerPermissionAdmin):
+    pass
 
 
 admin.site.register(models.SystemTask, SystemTaskAdmin)
@@ -139,4 +144,5 @@ admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
 admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
 admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
 admin.site.register(models.SystemProcess, SystemProcessAdmin)
+admin.site.register(models.SystemConsumerPermission, ConsumerPermissionAdmin)
 

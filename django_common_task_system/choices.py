@@ -47,3 +47,8 @@ class ScheduleQueueModule(TextChoices):
     PRIORITY_QUEUE = "%s.%s" % (queue.PriorityQueue.__module__, queue.PriorityQueue.__name__), '优先级队列'
     SIMPLE_QUEUE = "%s.%s" % (queue.SimpleQueue.__module__, queue.SimpleQueue.__name__), '简单队列'
     REDIS_LIST_QUEUE = "django_common_task_system.system_task.queue.RedisListQueue", 'Redis List队列'
+
+
+class ConsumerPermissionType(TextChoices):
+    IP_WHITE_LIST = 'I', 'IP白名单'
+

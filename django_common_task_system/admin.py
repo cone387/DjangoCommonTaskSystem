@@ -220,6 +220,7 @@ class TaskScheduleQueueAdmin(admin.ModelAdmin):
 
 class TaskScheduleProducerAdmin(admin.ModelAdmin):
     form = forms.TaskScheduleProducerForm
+    builtins = models.builtins
     schedule_get_name = 'task_schedule_get'
     list_display = ('id', 'name', 'producer_queue', 'consumer_url', 'task_num', 'status', 'update_time')
 
@@ -245,8 +246,20 @@ class TaskScheduleProducerAdmin(admin.ModelAdmin):
     consumer_url.short_description = '消费地址'
 
     def task_num(self, obj):
-        return models.builtins.queues.get(obj.queue.code).queue.qsize()
+        return self.builtins.queues.get(obj.queue.code).queue.qsize()
     task_num.short_description = '任务数量'
+
+
+class ConsumerPermissionAdmin(admin.ModelAdmin):
+    form = forms.ConsumerPermissionForm
+    list_display = ('id', 'producer', 'type', 'status', 'update_time')
+
+    fields = (
+        ('producer', 'status'),
+        'type',
+        'ip_whitelist',
+        'config'
+    )
 
 
 admin.site.register(TaskModel, TaskAdmin)
@@ -255,3 +268,5 @@ admin.site.register(models.TaskScheduleCallback, TaskScheduleCallbackAdmin)
 admin.site.register(TaskScheduleLogModel, TaskScheduleLogAdmin)
 admin.site.register(models.TaskScheduleQueue, TaskScheduleQueueAdmin)
 admin.site.register(models.TaskScheduleProducer, TaskScheduleProducerAdmin)
+admin.site.register(models.ConsumerPermission, ConsumerPermissionAdmin)
+

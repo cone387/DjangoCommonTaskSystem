@@ -7,8 +7,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from django.http.response import JsonResponse
-from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model
-from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, builtins
+from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
+from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, ConsumerPermission, builtins
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from queue import Empty
 from datetime import datetime
@@ -17,18 +17,20 @@ from .utils.schedule_time import nlp_config_to_schedule_config
 from threading import Thread
 import os
 import time
+import traceback
 
 
 TaskModel = get_task_model()
 ScheduleLogModel = get_schedule_log_model()
 ScheduleModel = get_task_schedule_model()
+ScheduleSerializer = get_task_schedule_serializer()
 
 
 class TaskScheduleThread(Thread):
     schedule_model = ScheduleModel
     producers = builtins.producers
     queues = builtins.queues
-    serializer = serializers.QueueScheduleSerializer
+    serializer = ScheduleSerializer
 
     def __init__(self):
         super().__init__(daemon=True)
@@ -53,7 +55,7 @@ class TaskScheduleThread(Thread):
             try:
                 self.produce()
             except Exception as err:
-                print(err)
+                traceback.print_exc()
             time.sleep(0.5)
 
 
@@ -69,17 +71,30 @@ if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'tru
 def delete_queue(sender, instance: TaskScheduleQueue, **kwargs):
     builtins.queues.delete(instance)
 
+
 @receiver(post_save, sender=TaskScheduleQueue)
 def add_queue(sender, instance: TaskScheduleQueue, created, **kwargs):
     builtins.queues.add(instance)
+
 
 @receiver(post_save, sender=TaskScheduleProducer)
 def add_producer(sender, instance: TaskScheduleProducer, created, **kwargs):
     builtins.producers.add(instance)
 
+
 @receiver(post_delete, sender=TaskScheduleProducer)
 def delete_producer(sender, instance: TaskScheduleProducer, **kwargs):
     builtins.producers.delete(instance)
+
+
+@receiver(post_save, sender=ConsumerPermission)
+def add_consumer_permission(sender, instance: ConsumerPermission, created, **kwargs):
+    builtins.consumer_permissions.add(instance)
+
+
+@receiver(post_delete, sender=ConsumerPermission)
+def delete_consumer_permission(sender, instance: ConsumerPermission, **kwargs):
+    builtins.consumer_permissions.delete(instance)
 
 
 class TaskListView(UserListAPIView):
@@ -109,29 +124,37 @@ class ScheduleLogViewSet(ModelViewSet):
 
 class TaskScheduleQueueAPI(object):
     queues = builtins.queues
+    consumer_permissions = builtins.consumer_permissions
     schedule_model = TaskSchedule
     log_model = ScheduleLogModel
+    serializer = ScheduleSerializer
+    permission_validator = None
 
     @classmethod
     def get(cls, request: Request, code: str):
         instance = cls.queues.get(code, None)
         if instance is None:
-            return JsonResponse({'message': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
+            return JsonResponse({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
+        permission_validator = cls.permission_validator or cls.consumer_permissions.get(code, None)
+        if permission_validator is not None:
+            error = permission_validator.validate(request)
+            if error:
+                return JsonResponse({'error': error}, status=status.HTTP_403_FORBIDDEN)
         try:
             task = instance.queue.get_nowait()
         except Empty:
             return JsonResponse({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            return JsonResponse({'message': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+            return JsonResponse({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         return JsonResponse(task)
 
     @classmethod
     def get_by_id(cls, request, pk):
         try:
             schedule = cls.schedule_model.objects.get(id=pk)
-            return Response(serializers.QueueScheduleSerializer(schedule).data)
+            return Response(cls.serializer(schedule).data)
         except TaskSchedule.DoesNotExist:
-            return Response({'msg': 'schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'schedule not found'}, status=status.HTTP_404_NOT_FOUND)
 
     @classmethod
     def retry(cls, request):
@@ -149,7 +172,7 @@ class TaskScheduleQueueAPI(object):
             for log in logs:
                 queue = cls.queues[log.queue].queue
                 log.schedule.next_schedule_time = log.schedule_time
-                data = serializers.QueueScheduleSerializer(log.schedule).data
+                data = cls.serializer(log.schedule).data
                 data['queue'] = log.queue
                 queue.put(data)
                 result[log.id] = log.queue
@@ -193,7 +216,7 @@ class TaskScheduleQueueAPI(object):
                     result[schedule.id] = 'no such queue: %s' % queue_mapping[schedule.id]
                 else:
                     schedule.next_schedule_time = schedule_time_mapping[schedule.id]
-                    data = serializers.QueueScheduleSerializer(schedule).data
+                    data = cls.serializer(schedule).data
                     data['queue'] = queue_mapping[schedule.id]
                     queue.queue.put(data)
                     result[schedule.id] = queue_mapping[schedule.id]
