@@ -8,22 +8,12 @@ from django.urls import reverse
 from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
-from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins
+from django_common_task_system.system_task.models import SystemSchedule, SystemTask
 from django_common_task_system.models import TaskScheduleCallback
-from django_common_task_system.choices import TaskScheduleStatus
+
 
 system_task_queue = Queue()
 logger = settings.logger
-
-
-def query_system_schedule():
-
-    now = datetime.now()
-    queryset = SystemSchedule.objects.filter(next_schedule_time__lte=now, status=TaskScheduleStatus.OPENING.value)
-    for schedule in queryset:
-        system_task_queue.put(copy.deepcopy(schedule))
-        schedule.generate_next_schedule()
-    return queryset
 
 
 def request_system_schedule():
@@ -62,14 +52,6 @@ def get_system_schedule():
         if schedule:
             return schedule
         time.sleep(1)
-    # try:
-    #     return system_task_queue.get(timeout=2)
-    # except Empty:
-    #     logger.debug('\r[%s]%s' % (time.strftime('%Y-%m-%d %H:%M:%S'), 'waiting for system schedule...'))
-    #     query_system_schedule()
-    #     if system_task_queue.empty():
-    #         request_system_schedule()
-    # return get_system_schedule()
 
 
 def get_schedule_executor(schedule):

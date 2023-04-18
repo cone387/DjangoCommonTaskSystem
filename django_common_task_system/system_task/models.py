@@ -217,7 +217,7 @@ class BuiltinTasks:
         unit = 'month'
         self.system_log_cleaning = SystemTask.objects.get_or_create(
             name='系统日志清理',
-            parent=self.shell_execution_parent_task,
+            parent=self.sql_execution_parent_task,
             category=self.system_default_category,
             user=user,
             defaults={
@@ -246,7 +246,7 @@ class BuiltinTasks:
             name='任务日志清理',
             user=user,
             category=self.system_default_category,
-            parent=self.shell_execution_parent_task,
+            parent=self.sql_execution_parent_task,
             defaults={
                 'config': {
                     'sql': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
@@ -381,16 +381,19 @@ class BuiltinSchedules:
         self.test_sql_execution = SystemSchedule.objects.get_or_create(
             task=tasks.test_sql_execution,
             user=user,
+            status=TaskScheduleStatus.TEST.value,
             defaults=defaults
         )[0]
         self.test_sql_produce = SystemSchedule.objects.get_or_create(
             task=tasks.test_sql_produce,
             user=user,
+            status=TaskScheduleStatus.TEST.value,
             defaults=defaults
         )[0]
         self.test_shell_execution = SystemSchedule.objects.get_or_create(
             task=tasks.test_shell_execution,
             user=user,
+            status=TaskScheduleStatus.TEST.value,
             defaults=defaults
         )[0]
 

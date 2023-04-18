@@ -542,6 +542,7 @@ class AbstractTaskScheduleLog(models.Model):
     class Meta:
         db_table = 'task_schedule_log'
         verbose_name = verbose_name_plural = '任务日志'
+        ordering = ('-create_time',)
         abstract = True
 
     def __str__(self):
