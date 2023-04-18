@@ -4,7 +4,7 @@ from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleS
 from django_common_task_system.models import AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, \
     TaskScheduleLog, AbstractScheduleCallback, \
     AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, AbstractConsumerPermission, \
-    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, builtin_initialized_signal
+    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, system_initialize_signal
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
 import os
@@ -131,6 +131,7 @@ class BuiltinQueues(BaseBuiltinQueues):
 
 
 class BuiltinProducers(BaseBuiltinProducers):
+    model = SystemScheduleProducer
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = SystemScheduleProducer.objects.get_or_create(
@@ -436,7 +437,7 @@ class Builtins:
                     self._tasks = BuiltinTasks(user, self._queues)
                     self._schedules = BuiltinSchedules(user, self._tasks)
                     self._consumer_permissions = BuiltinConsumerPermissions(self._producers)
-                    builtin_initialized_signal.send(sender='builtin_initialized',
+                    system_initialize_signal.send(sender='builtin_initialized',
                                                     app='django_common_task_system.system_task')
 
     @property

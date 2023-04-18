@@ -18,8 +18,10 @@ import re
 import os
 from django.core.validators import ValidationError
 from django.dispatch import Signal, receiver
+from threading import Event
 
-builtin_initialized_signal = Signal()
+system_initialize_signal = Signal()
+system_schedule_event = Event()
 
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
@@ -30,7 +32,7 @@ is_task_initialized = 'django_common_task_system' in settings.INSTALLED_APPS
 is_system_task_initialized = 'django_common_system_task.system_task' in settings.INSTALLED_APPS
 
 
-@receiver(builtin_initialized_signal, sender='builtin_initialized')
+@receiver(system_initialize_signal, sender='builtin_initialized')
 def on_builtin_initialized(sender, app=None, **kwargs):
     global is_task_initialized, is_system_task_initialized
     if app == 'django_common_task_system':
@@ -41,7 +43,9 @@ def on_builtin_initialized(sender, app=None, **kwargs):
         from threading import Timer
 
         def send_signal():
-            builtin_initialized_signal.send(sender='system_initialized')
+            system_initialize_signal.send(sender='system_initialized')
+        # 这里django_common_task_system和django_common_system_task都初始化完成了, 但是其他app还未
+        # 完成初始化, 所以这里延迟一段时间再发送信号
         Timer(2, send_signal).start()
 
 
@@ -726,7 +730,7 @@ class Builtins:
                     self._queues = BuiltinQueues()
                     self._producers = BuiltinProducers(self._queues)
                     self._consumer_permissions = BuiltinConsumerPermissions()
-                    builtin_initialized_signal.send(sender='builtin_initialized', app='django_common_task_system')
+                    system_initialize_signal.send(sender='builtin_initialized', app='django_common_task_system')
 
     @property
     def queues(self) -> BuiltinQueues:

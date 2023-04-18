@@ -6,12 +6,16 @@ from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
-from django_common_task_system.system_task.models import SystemScheduleQueue, SystemSchedule, \
+from django_common_task_system.models import system_initialize_signal, system_schedule_event
+from .models import SystemScheduleQueue, SystemSchedule, \
     SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission
 from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread
 from .models import builtins
 from .serializers import QueueScheduleSerializer
 import os
+
+
+builtins.initialize()
 
 
 class SystemScheduleThread(TaskScheduleThread):
@@ -21,13 +25,10 @@ class SystemScheduleThread(TaskScheduleThread):
     serializer = QueueScheduleSerializer
 
 
-if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
-    from django.conf import settings
-
-    if 'django_common_task_system.system_task' in settings.INSTALLED_APPS:
-        builtins.initialize()
-        thread = SystemScheduleThread()
-        thread.start()
+@receiver(system_initialize_signal, sender='system_initialized')
+def on_system_initialized(sender, **kwargs):
+    thread = SystemScheduleThread()
+    thread.start()
 
 
 @receiver(post_delete, sender=SystemScheduleQueue)

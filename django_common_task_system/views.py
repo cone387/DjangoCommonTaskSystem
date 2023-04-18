@@ -14,8 +14,8 @@ from queue import Empty
 from datetime import datetime
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
+from .models import system_initialize_signal, system_schedule_event
 from threading import Thread
-import os
 import time
 import traceback
 
@@ -24,6 +24,8 @@ TaskModel = get_task_model()
 ScheduleLogModel = get_schedule_log_model()
 ScheduleModel = get_task_schedule_model()
 ScheduleSerializer = get_task_schedule_serializer()
+
+builtins.initialize()
 
 
 class TaskScheduleThread(Thread):
@@ -51,7 +53,9 @@ class TaskScheduleThread(Thread):
                 schedule.generate_next_schedule()
 
     def run(self) -> None:
-        while True:
+        # 等待系统初始化完成, 5秒后自动开始
+        system_schedule_event.wait(timeout=5)
+        while system_schedule_event.is_set():
             try:
                 self.produce()
             except Exception as err:
@@ -59,12 +63,10 @@ class TaskScheduleThread(Thread):
             time.sleep(0.5)
 
 
-if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
-    from django.conf import settings
-    if 'django_common_task_system' in settings.INSTALLED_APPS:
-        builtins.initialize()
-        thread = TaskScheduleThread()
-        thread.start()
+@receiver(system_initialize_signal, sender='system_initialized')
+def on_system_initialized(sender, **kwargs):
+    thread = TaskScheduleThread()
+    thread.start()
 
 
 @receiver(post_delete, sender=TaskScheduleQueue)
