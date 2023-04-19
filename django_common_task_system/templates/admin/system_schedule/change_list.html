@@ -21,6 +21,7 @@
 
 {% block extrahead %}
 {{ block.super }}
+<script type="text/javascript">window.__admin_media_prefix__ = "{% filter escapejs %}{% static 'admin/' %}{% endfilter %}";</script>
 {{ media.js }}
 <script src="{% static 'admin/js/filters.js' %}" defer></script>
 {% endblock %}
@@ -40,6 +41,7 @@
 {% block coltype %}{% endblock %}
 
 {% block content %}
+  <div id="option-msg" style="text-align: center; color: red"></div>
   <div id="content-main">
     {% block object-tools %}
         <ul class="object-tools">
@@ -87,8 +89,39 @@
   </div>
 
     <script>
-        (function ($) {
+        function put_schedule(base_url, schedule_id){
+            const schedule_box = $('#schedule_box_' + schedule_id);
+            let date = schedule_box.find('input[class="vDateField"]').val();
+            let time = schedule_box.find('input[class="vTimeField"]').val();
+            if(date === ""){
+                date = new Date().toLocaleDateString();
+            }
+            if (time === ""){
+                time = new Date().toLocaleTimeString();
+            }
+            if(time.split(':').length === 2){
+                time = time + ':00'
+            }
+            const url = base_url + '&t=' + date.replaceAll('/', '-') + ' ' + time;
+            $.ajax({
+                url: url,
+                dataType: 'json',
+                contentType: 'application/json; charset=utf-8',
+                success: function(data){
+                    $('#option-msg').text("加入成功");
+                    $(document).trigger('mouseup');
+                    setTimeout(function(){
+                        $('#option-msg').text("");
+                    }, 1000);
+                },
+                error: function(data){
+                    console.debug(data);
+                    alert(JSON.stringify(JSON.parse(data.responseText)));
+                }}
+            );
+        }
 
+        (function ($) {
             $.fn.popmenu = function (options) {
                 var settings = $.extend({
                     'controller': true,
@@ -170,7 +203,7 @@
             };
         }(jQuery));
         $('.schedule_box').each(function () {
-            $(this).popmenu();
+            $(this).popmenu({background: '#79aec8', color: 'black'});
         });
     </script>
 {% endblock %}

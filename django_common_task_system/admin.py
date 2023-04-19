@@ -140,24 +140,34 @@ class TaskScheduleAdmin(UserAdmin):
     schedule_sub_type.short_description = '详细'
 
     def put(self, obj):
-        url = reverse(self.schedule_put_name) + '?i=%s' % obj.id
-        templates = ""
         now = datetime.now()
+        url = reverse(self.schedule_put_name) + '?i=%s' % obj.id
+        templates = '''
+            <div style="padding: 10px; border-bottom: 1px solid black">
+                <div>
+                    <span>计划日期</span>
+                    <input type="text" value="%s" class="vDateField">
+                </div>
+                <span>计划时间</span>
+                <input type="text" value="%s" class="vTimeField">
+            </div>
+        ''' % (now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S'))
         for queue in self.queues.values():
-            queue_url = url + '&q=%s&t=%s' % (queue.code, now.strftime('%Y-%m-%d %H:%M:%S'))
+            queue_url = url + '&q=%s' % queue.code
             templates += """
                 <li>
-                    <a href="%s" target="_blank"><div>%s</div></a>
+                    <a href="javascript:void(0);" onclick="put_schedule('%s', %s)"><div>%s</div></a>
                 </li>
-            """ % (queue_url, queue.name)
+            """ % (queue_url, obj.id, queue.name,)
         return mark_safe(
             '''
-                <div class="schedule_box">
+            
+                <div class="schedule_box" id="schedule_box_%s">
                     <span class="pop_ctrl" style="padding:5px;border:none;color: var(--secondary)">加入队列</span>
                     <ul>%s</ul>
                 </div>
                 
-            ''' % templates
+            ''' % (obj.id, templates)
         )
     put.allow_tags = True
     put.short_description = '调度'
@@ -169,10 +179,15 @@ class TaskScheduleAdmin(UserAdmin):
             'https://cdn.bootcss.com/bootstrap/4.1.3/js/bootstrap.min.js',
             # reverse('admin:jsi18n'),
             'common_task_system/js/task_schedule_admin.js',
+            'common_task_system/js/calendar.js',
+            'admin/js/calendar.js',
+            'admin/js/admin/DateTimeShortcuts.js'
         )
         css = {
             'all': (
                 'common_task_system/css/task_schedule_admin.css',
+                'admin/css/base.css',
+                'admin/css/forms.css',
             )
         }
 
