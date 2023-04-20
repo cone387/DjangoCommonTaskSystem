@@ -8,7 +8,8 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from django.http.response import JsonResponse
 from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
-from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, ConsumerPermission, builtins
+from .choices import TaskScheduleStatus
+from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, ConsumerPermission, builtins, ScheduleConfig
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from queue import Empty
 from datetime import datetime
@@ -38,6 +39,7 @@ class TaskScheduleThread(Thread):
         super().__init__(daemon=True)
 
     def produce(self):
+        now = datetime.now()
         for producer in self.producers.values():
             queue = self.queues[producer.queue.code]
             # 队列长度大于1000时不再生产, 防止内存溢出
@@ -47,15 +49,23 @@ class TaskScheduleThread(Thread):
             if producer.lte_now:
                 queryset = queryset.filter(next_schedule_time__lte=datetime.now())
             for schedule in queryset:
-                data = self.serializer(schedule).data
-                data['queue'] = queue.code
-                queue.queue.put(data)
-                schedule.generate_next_schedule()
+                try:
+                    while schedule.next_schedule_time <= now:
+                        data = self.serializer(schedule).data
+                        data['queue'] = queue.code
+                        queue.queue.put(data)
+                        schedule.next_schedule_time = ScheduleConfig(config=schedule.config
+                                                                     ).get_next_time(schedule.next_schedule_time)
+                    schedule.save(update_fields=('next_schedule_time', ))
+                except Exception as e:
+                    schedule.status = TaskScheduleStatus.ERROR.value
+                    schedule.save(update_fields=('status',))
+                    traceback.print_exc()
 
     def run(self) -> None:
         # 等待系统初始化完成, 5秒后自动开始
         system_schedule_event.wait(timeout=5)
-        while system_schedule_event.is_set():
+        while True:
             try:
                 self.produce()
             except Exception as err:
