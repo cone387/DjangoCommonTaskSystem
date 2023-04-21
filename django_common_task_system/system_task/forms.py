@@ -3,7 +3,7 @@ from django import forms
 import os
 import time
 from .process import ProcessManager
-from ..system_task_execution.main import start_by_server
+from ..system_task_execution.main import start_system_client
 from django_common_task_system.forms import TaskScheduleProducerForm, TaskScheduleQueueForm
 
 
@@ -79,7 +79,7 @@ class SystemProcessForm(forms.ModelForm):
         cleaned_data = super(SystemProcessForm, self).clean()
         log_file = cleaned_data.get('log_file')
         try:
-            p = ProcessManager.create(start_by_server, log_file=log_file)
+            p = ProcessManager.create(start_system_client, log_file=log_file)
         except Exception as e:
             self.add_error('endpoint', '启动失败: %s' % e)
             cleaned_data['status'] = False

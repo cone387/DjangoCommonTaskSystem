@@ -7,7 +7,7 @@ from . import models
 from . import forms
 from .. import admin as base_admin
 from .process import ProcessManager
-from ..system_task_execution.main import start_by_server
+from ..system_task_execution.main import start_system_client
 import os
 
 
@@ -22,7 +22,7 @@ def init_system_process():
         process_name=name,
         log_file=log_file
     )
-    process = ProcessManager.create(start_by_server, instance.log_file)
+    process = ProcessManager.create(start_system_client, instance.log_file)
     instance.process_id = process.pid
     instance.save()
 
@@ -61,7 +61,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
 
     def has_delete_permission(self, request, obj=None):
         if obj:
-            return obj.category != models.builtins.tasks.system_default_category
+            return obj.category != models.builtins.categories.system_default_category
         return True
 
 
@@ -81,7 +81,7 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
 
     def has_delete_permission(self, request, obj=None):
         if obj:
-            return obj.task.category != models.builtins.tasks.system_default_category
+            return obj.task.category != models.builtins.categories.system_default_category
         return True
 
 

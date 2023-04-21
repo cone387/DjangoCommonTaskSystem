@@ -19,6 +19,7 @@ import os
 from django.core.validators import ValidationError
 from django.dispatch import Signal, receiver
 from threading import Event
+from collections import OrderedDict
 
 system_initialize_signal = Signal()
 system_schedule_event = Event()
@@ -589,8 +590,61 @@ class ConsumerPermission(AbstractConsumerPermission):
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
-class BaseBuiltinQueues(dict):
-    model = TaskScheduleQueue
+class BuiltinModels(OrderedDict):
+    model: models.Model = None
+    model_unique_kwargs = []
+
+    def init_object(self, obj: models.Model):
+        kwargs = {
+            key: getattr(obj, key) for key in self.model_unique_kwargs
+        }
+        defaults = {
+            filed.name: getattr(obj, filed.name) for filed in obj._meta.fields if filed.name not in kwargs
+        }
+        current = self.model.objects.get_or_create(
+            defaults=defaults, **kwargs
+        )[0]
+        for field in obj._meta.fields:
+            setattr(obj, field.name, getattr(current, field.name))
+        return obj
+
+    def initialize(self):
+        for k, v in self.__dict__.items():
+            if isinstance(v, self.model):
+                obj = self.init_object(v)
+                self.add(obj, k)
+
+    def add(self, obj: models.Model, key=None):
+        if key:
+            self[key] = obj
+
+    def delete(self, obj, key):
+        if key:
+            self.pop(key, None)
+
+
+class BuiltinCallbacks(BuiltinModels):
+    model = TaskScheduleCallback
+    model_unique_kwargs = ['name']
+
+    def __init__(self, user):
+        self.http_log_upload = self.model(
+            name='Http日志上报',
+            trigger_event=TaskCallbackEvent.DONE,
+            status=TaskCallbackStatus.ENABLE.value,
+            user=user,
+        )
+        super(BuiltinCallbacks, self).__init__()
+
+    def init_object(self, obj: models.Model):
+        super(BuiltinCallbacks, self).init_object(obj)
+        
+    def initialize(self):
+        super(BuiltinCallbacks, self).initialize()
+
+
+class BaseBuiltinQueues(BuiltinModels):
+
     status_params_mapping = {
         TaskScheduleStatus.OPENING.value: 'opening',
         TaskScheduleStatus.CLOSED.value: 'closed',
@@ -599,12 +653,14 @@ class BaseBuiltinQueues(dict):
         TaskScheduleStatus.ERROR.value: 'error',
     }
 
+    model_unique_kwargs = ['code']
+
     def __init__(self):
         super(BaseBuiltinQueues, self).__init__()
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
-    def add(self, instance: AbstractTaskScheduleQueue):
+    def add(self, instance: AbstractTaskScheduleQueue, key=None):
         if instance.status:
             old = self.get(instance.code)
             if not old or old.module != instance.module or old.config != instance.config:
@@ -613,40 +669,38 @@ class BaseBuiltinQueues(dict):
         elif not instance.status:
             self.pop(instance.code, None)
 
-    def delete(self, instance: AbstractTaskScheduleQueue):
+    def delete(self, instance: AbstractTaskScheduleQueue, key=None):
         self.pop(instance.code, None)
 
 
 class BuiltinQueues(BaseBuiltinQueues):
+    model = TaskScheduleQueue
+
     def __init__(self):
-        self.opening = self.model.objects.get_or_create(
+        self.opening = self.model(
             code=self.status_params_mapping[TaskScheduleStatus.OPENING.value],
-            defaults={
-                'status': True,
-                'module': ScheduleQueueModule.QUEUE.value,
-                'name': '已启用任务'
-            }
-        )[0]
-        self.test = self.model.objects.get_or_create(
+            status=True,
+            module=ScheduleQueueModule.QUEUE.value,
+            name='已启用任务'
+        )
+        self.test = self.model(
             code=self.status_params_mapping[TaskScheduleStatus.TEST.value],
-            defaults={
-                'status': True,
-                'module': ScheduleQueueModule.QUEUE.value,
-                'name': '测试任务'
-            }
-        )[0]
+            status=True,
+            module=ScheduleQueueModule.QUEUE.value,
+            name='测试任务'
+        )
         super(BuiltinQueues, self).__init__()
 
 
-class BaseBuiltinProducers(dict):
-    model = TaskScheduleProducer
+class BaseBuiltinProducers(BuiltinModels):
+    model_unique_kwargs = ['queue']
 
     def __init__(self):
         super(BaseBuiltinProducers, self).__init__()
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
-    def add(self, instance: AbstractTaskScheduleProducer):
+    def add(self, instance: AbstractTaskScheduleProducer, key=None):
         if instance.status:
             old = self.get(instance.id)
             if not old or old.queue != instance.queue:
@@ -654,48 +708,45 @@ class BaseBuiltinProducers(dict):
         elif not instance.status:
             self.pop(instance.id, None)
 
-    def delete(self, instance: AbstractTaskScheduleProducer):
+    def delete(self, instance: AbstractTaskScheduleProducer, key=None):
         self.pop(instance.id, None)
 
 
 class BuiltinProducers(BaseBuiltinProducers):
+    model = TaskScheduleProducer
 
     def __init__(self, queues: BuiltinQueues):
-        self.opening = TaskScheduleProducer.objects.get_or_create(
+        self.opening = self.model(
             queue=queues.opening,
             lte_now=True,
-            defaults={
-                'filters': {
-                    'status': TaskScheduleStatus.OPENING.value,
-                },
-                'status': True,
-                'name': '默认'
-            }
-        )[0]
-
-        self.test = TaskScheduleProducer.objects.get_or_create(
+            filters={
+                'status': TaskScheduleStatus.OPENING.value,
+            },
+            status=True,
+            name='默认'
+        )
+        self.test = self.model(
             queue=queues.test,
             lte_now=True,
-            defaults={
-                'filters': {
-                    'status': TaskScheduleStatus.TEST.value,
-                },
-                'status': True,
-                'name': '测试'
-            }
-        )[0]
+            filters={
+                'status': TaskScheduleStatus.TEST.value,
+            },
+            status=True,
+            name='测试'
+        )
         super(BuiltinProducers, self).__init__()
 
 
-class BaseConsumerPermissions(dict):
+class BaseConsumerPermissions(BuiltinModels):
     model = ConsumerPermission
+    model_unique_kwargs = ['producer', 'type']
 
     def __init__(self):
         super(BaseConsumerPermissions, self).__init__()
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
-    def add(self, instance: AbstractConsumerPermission):
+    def add(self, instance: AbstractConsumerPermission, key=None):
         if instance.status:
             old = self.get(instance.producer_id)
             if not old or old.type != instance.type or old.config != instance.config:
@@ -705,7 +756,7 @@ class BaseConsumerPermissions(dict):
         elif not instance.status:
             self.pop(instance.producer.queue.code, None)
 
-    def delete(self, instance: AbstractConsumerPermission):
+    def delete(self, instance: AbstractConsumerPermission, key=None):
         self.pop(instance.producer.queue.code, None)
 
 
@@ -713,40 +764,45 @@ class BuiltinConsumerPermissions(BaseConsumerPermissions):
     model = ConsumerPermission
 
 
-class Builtins:
+class BaseBuiltins:
+
+    app = None
 
     def __init__(self):
         self._initialized = False
-        self._queues = None
-        self._producers = None
-        self._consumer_permissions = None
+        self.user = UserModel(username='系统', is_superuser=True)
+
+    def init_user(self):
+        user = UserModel.objects.filter(is_superuser=True).order_by('id').first()
+        if not user:
+            raise Exception('请先创建超级用户')
+        for field in user._meta.fields:
+            setattr(self.user, field.name, getattr(user, field.name))
 
     def initialize(self):
         if not self._initialized:
             self._initialized = True
             if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
                 from django.conf import settings
-                if 'django_common_task_system' in settings.INSTALLED_APPS:
-                    print('初始化内置任务')
-                    self._queues = BuiltinQueues()
-                    self._producers = BuiltinProducers(self._queues)
-                    self._consumer_permissions = BuiltinConsumerPermissions()
-                    system_initialize_signal.send(sender='builtin_initialized', app='django_common_task_system')
+                if self.app in settings.INSTALLED_APPS:
+                    print('[%s]初始化内置任务' % self.app)
+                    self.init_user()
+                    for i in self.__dict__.values():
+                        if isinstance(i, BuiltinModels):
+                            i.initialize()
+                    system_initialize_signal.send(sender='builtin_initialized', app=self.app)
 
-    @property
-    def queues(self) -> BuiltinQueues:
-        self.initialize()
-        return self._queues
 
-    @property
-    def producers(self) -> BuiltinProducers:
-        self.initialize()
-        return self._producers
+class Builtins(BaseBuiltins):
 
-    @property
-    def consumer_permissions(self) -> BuiltinConsumerPermissions:
-        self.initialize()
-        return self._consumer_permissions
+    app = 'django_common_task_system'
+
+    def __init__(self):
+        super(Builtins, self).__init__()
+        self.queues = BuiltinQueues()
+        self.callbacks = BuiltinCallbacks(self.user)
+        self.producers = BuiltinProducers(self.queues)
+        self.consumer_permissions = BuiltinConsumerPermissions()
 
 
 builtins = Builtins()

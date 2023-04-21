@@ -1,14 +1,13 @@
 import os
 import time
-import copy
 import requests
-from queue import Queue, Empty
+from queue import Queue
 from datetime import datetime
 from django.urls import reverse
 from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
-from django_common_task_system.system_task.models import SystemSchedule, SystemTask
+from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins
 from django_common_task_system.models import TaskScheduleCallback
 
 
@@ -16,9 +15,7 @@ system_task_queue = Queue()
 logger = settings.logger
 
 
-def request_system_schedule():
-
-    url = urljoin(settings.HOST, reverse('system_schedule_get', args=('opening', )))
+def request_system_schedule(url):
     response = requests.get(url)
     if response.status_code == 200:
         result = response.json()
@@ -46,9 +43,9 @@ def request_system_schedule():
         # system_task_queue.put(schedule)
 
 
-def get_system_schedule():
+def get_system_schedule(url):
     while True:
-        schedule = request_system_schedule()
+        schedule = request_system_schedule(url)
         if schedule:
             return schedule
         time.sleep(1)
@@ -67,21 +64,22 @@ def get_schedule_executor(schedule):
     return cls(schedule)
 
 
-def run():
-    schedule = get_system_schedule()
-    logger.info('get system schedule: %s', schedule)
+def run(schedule):
     executor = get_schedule_executor(schedule)
     log, err = executor.start()
     if not err:
         logger.info('system schedule execute success: %s', log.result)
 
 
-def start_client(**kwargs):
+def start_client(queue=None, **kwargs):
     logger.info('system executor start')
     for k, v in os.environ.items():
         logger.info('Env: %s -> %s' % (k, v))
+    consumer_url = urljoin(settings.HOST, reverse('system_schedule_get', args=(queue or builtins.queues.opening.code,)))
     while True:
         try:
-            run()
+            schedule = get_system_schedule(consumer_url)
+            logger.info('get system schedule: %s', schedule)
+            run(schedule)
         except Exception as e:
             logger.exception(e)
