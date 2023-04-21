@@ -65,3 +65,11 @@ class TaskScheduleLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskScheduleLogModel
         fields = '__all__'
+
+
+class ExceptionSerializer(serializers.ModelSerializer):
+    ip = serializers.ReadOnlyField()
+
+    class Meta:
+        model = models.ExceptionReport
+        fields = '__all__'

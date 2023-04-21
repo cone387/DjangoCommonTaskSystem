@@ -3,8 +3,8 @@ from django.conf import settings
 from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType
 from django_common_task_system.models import (
     AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, TaskScheduleLog, AbstractScheduleCallback, 
-    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, AbstractConsumerPermission, 
-    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, BaseBuiltins, 
+    AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, AbstractConsumerPermission, AbstractExceptionReport,
+    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, BaseBuiltins,
     BuiltinModels
 )
 from django_common_objects.models import CommonCategory
@@ -86,6 +86,13 @@ class SystemConsumerPermission(AbstractConsumerPermission):
 
     class Meta(AbstractConsumerPermission.Meta):
         db_table = 'system_consumer_permission'
+        abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
+
+
+class SystemExceptionReport(AbstractExceptionReport):
+
+    class Meta(AbstractExceptionReport.Meta):
+        db_table = 'system_exception_report'
         abstract = 'django_common_task_system.system_task' not in settings.INSTALLED_APPS
 
 

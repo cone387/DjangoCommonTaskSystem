@@ -10,4 +10,5 @@ urlpatterns = [
     path('schedule/queue/status/', views.SystemScheduleQueueAPI.status),
     path('process/logs/<int:process_id>/', views.SystemProcessView.show_logs, name='system_process_log'),
     path('process/stop/<int:process_id>/', views.SystemProcessView.stop_process, name='system_process_stop'),
+    path('exception/report/', views.SystemExceptionReportView.as_view()),
 ]

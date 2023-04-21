@@ -44,3 +44,9 @@ class TaskScheduleLogSerializer(serializers.TaskScheduleLogSerializer):
 
     class Meta(serializers.TaskScheduleLogSerializer.Meta):
         model = models.SystemScheduleLog
+
+
+class ExceptionSerializer(serializers.ExceptionSerializer):
+
+    class Meta(serializers.ExceptionSerializer.Meta):
+        model = models.SystemExceptionReport

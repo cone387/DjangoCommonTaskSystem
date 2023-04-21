@@ -6,12 +6,12 @@ from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
-from django_common_task_system.models import system_initialize_signal, system_schedule_event
+from django_common_task_system.models import system_initialize_signal
 from .models import SystemScheduleQueue, SystemSchedule, \
-    SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission
-from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread
+    SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport
+from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread, ExceptionReportView
 from .models import builtins
-from .serializers import QueueScheduleSerializer
+from .serializers import QueueScheduleSerializer, ExceptionSerializer
 import os
 
 
@@ -129,3 +129,8 @@ class SystemProcessView:
         process.delete()
         return HttpResponse('SystemProcess(%s)已停止' % process_id)
 
+
+class SystemExceptionReportView(ExceptionReportView):
+
+    queryset = SystemExceptionReport.objects.all()
+    serializer_class = ExceptionSerializer

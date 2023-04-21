@@ -5,8 +5,9 @@ from django.utils.safestring import mark_safe
 from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from datetime import datetime
-from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule
+from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
 from . import models, forms, get_task_model, get_schedule_log_model
+
 TaskModel = get_task_model()
 TaskScheduleLogModel = get_schedule_log_model()
 
@@ -267,7 +268,7 @@ class TaskScheduleProducerAdmin(admin.ModelAdmin):
 
 class ConsumerPermissionAdmin(admin.ModelAdmin):
     form = forms.ConsumerPermissionForm
-    list_display = ('id', 'producer', 'type', 'status', 'update_time')
+    list_display = ('id', 'producer', 'type', 'summary', 'status', 'update_time')
 
     fields = (
         ('producer', 'status'),
@@ -275,6 +276,19 @@ class ConsumerPermissionAdmin(admin.ModelAdmin):
         'ip_whitelist',
         'config'
     )
+
+    def summary(self, obj):
+        if obj.type == ConsumerPermissionType.IP_WHITE_LIST:
+            return obj.config['ip_whitelist'][0:5]
+        return '-'
+    summary.short_description = '摘要'
+
+
+class ExceptionReportAdmin(admin.ModelAdmin):
+    list_display = ('id', 'ip', 'content', 'create_time')
+
+    def get_readonly_fields(self, request, obj=None):
+        return [field.name for field in self.model._meta.fields]
 
 
 admin.site.register(TaskModel, TaskAdmin)
@@ -284,4 +298,5 @@ admin.site.register(TaskScheduleLogModel, TaskScheduleLogAdmin)
 admin.site.register(models.TaskScheduleQueue, TaskScheduleQueueAdmin)
 admin.site.register(models.TaskScheduleProducer, TaskScheduleProducerAdmin)
 admin.site.register(models.ConsumerPermission, ConsumerPermissionAdmin)
+admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 

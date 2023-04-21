@@ -590,6 +590,29 @@ class ConsumerPermission(AbstractConsumerPermission):
         abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
 
 
+class AbstractExceptionReport(models.Model):
+    id = models.AutoField(primary_key=True, verbose_name='ID')
+    ip = models.CharField(max_length=100, verbose_name='IP')
+    content = models.TextField(verbose_name='内容')
+    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'task_exception_report'
+        verbose_name = verbose_name_plural = '异常报告'
+        ordering = ('-create_time',)
+        abstract = True
+
+    def __str__(self):
+        return "Exception(%s, %s)" % (self.ip, self.content[:50])
+
+    __repr__ = __str__
+
+
+class ExceptionReport(AbstractExceptionReport):
+    class Meta(AbstractExceptionReport.Meta):
+        abstract = 'django_common_task_system' not in settings.INSTALLED_APPS
+
+
 class BuiltinModels(OrderedDict):
     model: models.Model = None
     model_unique_kwargs = []

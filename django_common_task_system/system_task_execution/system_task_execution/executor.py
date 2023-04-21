@@ -1,5 +1,7 @@
 import os
 import time
+import traceback
+import socket
 import requests
 from queue import Queue
 from datetime import datetime
@@ -7,10 +9,11 @@ from django.urls import reverse
 from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
-from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins
+from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins, SystemExceptionReport
 from django_common_task_system.models import TaskScheduleCallback
 
 
+IP = socket.gethostbyname(socket.gethostname())
 system_task_queue = Queue()
 logger = settings.logger
 
@@ -83,3 +86,10 @@ def start_client(queue=None, **kwargs):
             run(schedule)
         except Exception as e:
             logger.exception(e)
+            try:
+                SystemExceptionReport.objects.create(
+                    ip=IP,
+                    content=traceback.format_exc(),
+                )
+            except Exception as e:
+                logger.exception(e)

@@ -133,7 +133,11 @@ class SystemScheduleProducerAdmin(base_admin.TaskScheduleProducerAdmin):
     builtins = models.builtins
 
 
-class ConsumerPermissionAdmin(base_admin.ConsumerPermissionAdmin):
+class SystemConsumerPermissionAdmin(base_admin.ConsumerPermissionAdmin):
+    pass
+
+
+class SystemExceptionAdmin(base_admin.ExceptionReportAdmin):
     pass
 
 
@@ -144,5 +148,6 @@ admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
 admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
 admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
 admin.site.register(models.SystemProcess, SystemProcessAdmin)
-admin.site.register(models.SystemConsumerPermission, ConsumerPermissionAdmin)
+admin.site.register(models.SystemConsumerPermission, SystemConsumerPermissionAdmin)
+admin.site.register(models.SystemExceptionReport, SystemExceptionAdmin)
 

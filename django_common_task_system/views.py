@@ -2,6 +2,7 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from rest_framework import status
 from rest_framework.decorators import api_view
+from rest_framework.generics import CreateAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,7 +10,8 @@ from rest_framework.viewsets import ModelViewSet
 from django.http.response import JsonResponse
 from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
 from .choices import TaskScheduleStatus
-from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, ConsumerPermission, builtins, ScheduleConfig
+from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
+    ConsumerPermission, ExceptionReport, builtins, ScheduleConfig
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from queue import Empty
 from datetime import datetime
@@ -47,7 +49,7 @@ class TaskScheduleThread(Thread):
                 continue
             queryset = self.schedule_model.objects.filter(**producer.filters)
             if producer.lte_now:
-                queryset = queryset.filter(next_schedule_time__lte=datetime.now())
+                queryset = queryset.filter(next_schedule_time__lte=now)
             for schedule in queryset:
                 try:
                     while schedule.next_schedule_time <= now:
@@ -257,3 +259,13 @@ class ScheduleTimeParseView(APIView):
             })
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ExceptionReportView(CreateAPIView):
+    queryset = ExceptionReport.objects.all()
+    serializer_class = serializers.ExceptionSerializer
+
+    def perform_create(self, serializer):
+        meta = self.request.META
+        ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
+        serializer.save(ip=ip)
