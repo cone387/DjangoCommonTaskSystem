@@ -1,7 +1,7 @@
+import inspect
 from django import forms
 from django.contrib.admin import widgets
 from django.utils.module_loading import import_string
-
 from .choices import TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus
 from django_common_objects.widgets import JSONWidget
 from .utils import foreign_key
@@ -346,7 +346,11 @@ class TaskScheduleQueueForm(forms.ModelForm):
                 if error:
                     self.add_error('config', error)
             if not self.errors:
-                queue = queueCls(**config)
+                args = inspect.getfullargspec(getattr(queueCls, '__init__'))
+                kwargs = {k: v for k, v in config.items() if k in args.args}
+                if 'name' not in kwargs:
+                    config.pop('name')
+                queue = queueCls(**kwargs)
                 validate = getattr(queue, 'validate', None)
                 if validate:
                     error = validate()

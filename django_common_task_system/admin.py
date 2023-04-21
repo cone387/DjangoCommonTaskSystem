@@ -140,6 +140,9 @@ class TaskScheduleAdmin(UserAdmin):
         return '-'
     schedule_sub_type.short_description = '详细'
 
+    def get_available_queues(self, obj):
+        return self.queues.values()
+
     def put(self, obj):
         now = datetime.now()
         url = reverse(self.schedule_put_name) + '?i=%s' % obj.id
@@ -153,7 +156,7 @@ class TaskScheduleAdmin(UserAdmin):
                 <input type="text" value="%s" class="vTimeField">
             </div>
         ''' % (now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S'))
-        for queue in self.queues.values():
+        for queue in self.get_available_queues(obj):
             queue_url = url + '&q=%s' % queue.code
             templates += """
                 <li>
@@ -172,6 +175,9 @@ class TaskScheduleAdmin(UserAdmin):
         )
     put.allow_tags = True
     put.short_description = '调度'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('task')
 
     class Media:
         js = (
@@ -214,7 +220,7 @@ class TaskScheduleQueueAdmin(admin.ModelAdmin):
     builtins = models.builtins
     schedule_get_name = 'task_schedule_get'
 
-    list_display = ('id', 'name', 'code', 'queue_url', 'module', 'queue_size', 'update_time')
+    list_display = ('id', 'name', 'code', 'queue_url', 'module', 'status', 'queue_size', 'update_time')
 
     fields = (
         ('code', 'module', 'status'),
@@ -223,7 +229,10 @@ class TaskScheduleQueueAdmin(admin.ModelAdmin):
     )
 
     def queue_size(self, obj):
-        return self.builtins.queues.get(obj.code).queue.qsize()
+        q = self.builtins.queues.get(obj.code, None)
+        if q:
+            return q.queue.qsize()
+        return 0
     queue_size.short_description = '队列大小'
 
     def queue_url(self, obj):
@@ -262,7 +271,10 @@ class TaskScheduleProducerAdmin(admin.ModelAdmin):
     consumer_url.short_description = '消费地址'
 
     def task_num(self, obj):
-        return self.builtins.queues.get(obj.queue.code).queue.qsize()
+        q = self.builtins.queues.get(obj.queue.code, None)
+        if q:
+            return q.queue.qsize()
+        return 0
     task_num.short_description = '任务数量'
 
 
