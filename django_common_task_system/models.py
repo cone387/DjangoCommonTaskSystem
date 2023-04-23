@@ -23,6 +23,7 @@ from collections import OrderedDict
 
 system_initialize_signal = Signal()
 system_schedule_event = Event()
+system_signal_sent = False
 
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
@@ -35,18 +36,20 @@ is_system_task_initialized = 'django_common_system_task.system_task' in settings
 
 @receiver(system_initialize_signal, sender='builtin_initialized')
 def on_builtin_initialized(sender, app=None, **kwargs):
-    global is_task_initialized, is_system_task_initialized
+    global is_task_initialized, is_system_task_initialized, system_signal_sent
     if app == 'django_common_task_system':
         is_task_initialized = True
     elif app == 'django_common_task_system.system_task':
         is_system_task_initialized = True
-    if is_task_initialized and is_system_task_initialized:
+    # 加入system_signal_sent判断, 防止重复发送信号
+    if is_task_initialized and is_system_task_initialized and not system_signal_sent:
         from threading import Timer
 
         def send_signal():
             system_initialize_signal.send(sender='system_initialized')
         # 这里django_common_task_system和django_common_system_task都初始化完成了, 但是其他app还未
         # 完成初始化, 所以这里延迟一段时间再发送信号
+        system_signal_sent = True
         Timer(2, send_signal).start()
 
 

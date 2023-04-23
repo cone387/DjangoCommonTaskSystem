@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from django.http.response import JsonResponse
+from django.conf import settings
 from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
 from .choices import TaskScheduleStatus
 from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
@@ -42,20 +43,24 @@ class TaskScheduleThread(Thread):
 
     def produce(self):
         now = datetime.now()
+        qsize = getattr(settings, 'SCHEDULE_QUEUE_MAX_SIZE', 1000)
+        max_queue_size = qsize * 2
         for producer in self.producers.values():
-            queue = self.queues[producer.queue.code]
+            queue_instance = self.queues[producer.queue.code]
+            queue = queue_instance.queue
             # 队列长度大于1000时不再生产, 防止内存溢出
-            if queue.queue.qsize() > 1000:
+            if queue.qsize() >= qsize:
                 continue
             queryset = self.schedule_model.objects.filter(**producer.filters)
             if producer.lte_now:
                 queryset = queryset.filter(next_schedule_time__lte=now)
             for schedule in queryset:
                 try:
-                    while schedule.next_schedule_time <= now:
+                    # 限制队列长度, 防止内存溢出
+                    while queue.qsize() < max_queue_size and schedule.next_schedule_time <= now:
                         data = self.serializer(schedule).data
-                        data['queue'] = queue.code
-                        queue.queue.put(data)
+                        data['queue'] = queue_instance.code
+                        queue.put(data)
                         schedule.next_schedule_time = ScheduleConfig(config=schedule.config
                                                                      ).get_next_time(schedule.next_schedule_time)
                     schedule.save(update_fields=('next_schedule_time', ))
@@ -67,12 +72,13 @@ class TaskScheduleThread(Thread):
     def run(self) -> None:
         # 等待系统初始化完成, 5秒后自动开始
         system_schedule_event.wait(timeout=5)
+        SCHEDULE_INTERVAL = getattr(settings, 'SCHEDULE_INTERVAL', 1)
         while True:
             try:
                 self.produce()
             except Exception as err:
                 traceback.print_exc()
-            time.sleep(0.5)
+            time.sleep(SCHEDULE_INTERVAL)
 
 
 @receiver(system_initialize_signal, sender='system_initialized')
