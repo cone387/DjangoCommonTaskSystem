@@ -212,7 +212,7 @@ class TaskScheduleQueueAPI(object):
             schedule_ids = [int(i) for i in schedule_ids.split(',')]
             queues = [i.strip() for i in queues.split(',')]
             schedule_times = [datetime.strptime(i, '%Y-%m-%d %H:%M:%S') for i in schedule_times.split(',')]
-            assert len(schedule_ids) < 1000, '不能超过1000个'
+            assert len(schedule_ids) <= 1000, '不能超过1000个'
             if len(queues) == 1:
                 queue_mapping = {x: queues[0] for x in schedule_ids}
             elif len(queues) == len(schedule_ids):
@@ -228,18 +228,27 @@ class TaskScheduleQueueAPI(object):
         except Exception as e:
             return JsonResponse({'error': 'ids参数错误: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            schedules = cls.schedule_model.objects.filter(id__in=schedule_ids)
-            result = {x: 'no such schedule' for x in schedule_ids}
-            for schedule in schedules:
-                queue = cls.queues.get(queue_mapping[schedule.id], None)
+            schedules = cls.schedule_model.objects.filter(id__in=set(schedule_ids))
+            schedule_mapping = {x.id: x for x in schedules}
+            result = {}
+            for schedule_id in schedule_ids:
+                queue_name = queue_mapping[schedule_id]
+                queue = cls.queues.get(queue_name, None)
                 if queue is None:
-                    result[schedule.id] = 'no such queue: %s' % queue_mapping[schedule.id]
-                else:
-                    schedule.next_schedule_time = schedule_time_mapping[schedule.id]
-                    data = cls.serializer(schedule).data
-                    data['queue'] = queue_mapping[schedule.id]
-                    queue.queue.put(data)
-                    result[schedule.id] = queue_mapping[schedule.id]
+                    result[queue_name] = 'no such queue: %s' % queue_name
+                    continue
+                schedule_time = schedule_time_mapping[schedule_id].strftime('%Y-%m-%d %H:%M:%S')
+                queue_result = result.setdefault(queue_name, {})
+                schedule = schedule_mapping.get(schedule_id, None)
+                if schedule is None:
+                    queue_result[schedule_id] = 'no such schedule: %s' % schedule_id
+                    continue
+                schedule_result = queue_result.setdefault(schedule_id, [])
+                schedule.next_schedule_time = schedule_time
+                data = cls.serializer(schedule).data
+                data['queue'] = queue.code
+                queue.queue.put(data)
+                schedule_result.append(schedule_time)
             return JsonResponse(result)
         except Exception as e:
             return JsonResponse({'error': '添加到队列失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)

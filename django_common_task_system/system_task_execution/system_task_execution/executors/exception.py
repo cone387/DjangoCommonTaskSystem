@@ -48,27 +48,35 @@ class SystemExceptionExecutor(BaseExecutor):
         ''' % (self.schedule_log_model._meta.db_table, max_retry_times, last_schedule_time, max_fetch_num,)
         with connection.cursor() as cursor:
             cursor.execute(command)
-            rows = cursor.fetchall()
-        if rows:
+            rows = list(cursor.fetchall())
+        batch_num = 1000
+        i = 0
+        batch = rows[:batch_num]
+        result = {}
+        error = None
+        while batch:
             path = reverse(self.handle_url)
             ids, queues, times = [], [], []
-            for q, i, t, *_ in rows:
+            for q, i, t, *_ in batch:
                 if i == self.schedule_id:
                     continue
                 ids.append(str(i))
                 queues.append(q)
                 times.append(t.strftime('%Y-%m-%d %H:%M:%S'))
-            if ids:
-                url = settings.HOST + path
-                result = requests.get(url, params={
-                    'i': ','.join(ids),
-                    'q': ','.join(queues),
-                    't': ','.join(times)
-                }).json()
-                if 'error' in result:
-                    raise Exception(result['error'])
-                return result
-        return "no schedule need to retry"
+            url = settings.HOST + path
+            batch_result = requests.get(url, params={
+                'i': ','.join(ids),
+                'q': ','.join(queues),
+                't': ','.join(times)
+            }).json()
+            result[i] = batch_result
+            if 'error' in batch_result:
+                error = batch_result['error']
+            i += 1
+            batch = rows[i * batch_num: (i + 1) * batch_num]
+        if error:
+            raise Exception(error)
+        return result
 
 
 class ScheduleExceptionExecutor(SystemExceptionExecutor):

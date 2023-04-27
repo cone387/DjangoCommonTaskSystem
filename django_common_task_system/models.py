@@ -375,6 +375,7 @@ class ScheduleConfig:
             hour, minute, second = int(hour), int(minute), int(second)
             timing_config = type_config[timing_type]
             timing_period = timing_config.get('period', 1)
+            next_time = datetime(next_time.year, next_time.month, next_time.day, hour, minute, second)
             if timing_type == ScheduleTimingType.DAY:
                 while next_time <= last_time:
                     next_time += timedelta(days=timing_period)
