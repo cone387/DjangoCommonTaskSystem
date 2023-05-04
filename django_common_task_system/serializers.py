@@ -51,6 +51,11 @@ class QueueScheduleSerializer(TaskScheduleSerializer):
     task = QueueTaskSerializer()
     callback = TaskCallbackSerializer()
     schedule_time = serializers.DateTimeField(source="next_schedule_time")
+    generator = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_generator(obj):
+        return getattr(obj, 'generator', 'auto')
 
     class Meta:
         model = models.TaskSchedule

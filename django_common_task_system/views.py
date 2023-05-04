@@ -192,6 +192,7 @@ class TaskScheduleQueueAPI(object):
             for log in logs:
                 queue = cls.queues[log.queue].queue
                 log.schedule.next_schedule_time = log.schedule_time
+                log.schedule.generator = 'retry'
                 data = cls.serializer(log.schedule).data
                 data['queue'] = log.queue
                 queue.put(data)
@@ -245,6 +246,7 @@ class TaskScheduleQueueAPI(object):
                     continue
                 schedule_result = queue_result.setdefault(schedule_id, [])
                 schedule.next_schedule_time = schedule_time
+                schedule.generator = 'put'
                 data = cls.serializer(schedule).data
                 data['queue'] = queue.code
                 queue.queue.put(data)
