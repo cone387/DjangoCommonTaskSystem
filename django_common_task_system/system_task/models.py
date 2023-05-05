@@ -197,7 +197,7 @@ class BuiltinTasks(BuiltinModels):
             user=user,
             category=categories.system_base_category,
             config={
-                'required_fields': ['shell'],
+                'required_fields': ['script'],
             }
         )
         self.sql_execution_parent_task = self.model(
@@ -205,7 +205,7 @@ class BuiltinTasks(BuiltinModels):
             user=user,
             category=categories.system_base_category,
             config={
-                'required_fields': ['sql'],
+                'required_fields': ['script'],
             }
         )
 
@@ -214,7 +214,7 @@ class BuiltinTasks(BuiltinModels):
             user=user,
             category=categories.system_base_category,
             config={
-                'required_fields': ['sql', 'queue'],
+                'required_fields': ['script', 'queue'],
             }
         )
 
@@ -226,7 +226,7 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_default_category,
             user=user,
             config={
-                'sql': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
+                'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
                        (SystemScheduleLog._meta.db_table, interval, unit)
             },
         )
@@ -249,7 +249,7 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_default_category,
             parent=self.sql_execution_parent_task,
             config={
-                'sql': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
+                'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
                        (TaskScheduleLog._meta.db_table, interval, unit)
             },
         )
@@ -269,7 +269,7 @@ class BuiltinTasks(BuiltinModels):
             parent=self.sql_execution_parent_task,
             category=categories.system_test_category,
             config={
-                'sql': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table
+                'script': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table
             },
             user=user
         )
@@ -279,7 +279,7 @@ class BuiltinTasks(BuiltinModels):
             parent=self.sql_produce_parent_task,
             category=categories.system_test_category,
             config={
-                'sql': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table,
+                'script': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table,
                 'queue': queues.test.code
             },
             user=user
@@ -289,7 +289,7 @@ class BuiltinTasks(BuiltinModels):
             parent=self.shell_execution_parent_task,
             category=categories.system_test_category,
             config={
-                'shell': 'echo "hello world"'
+                'script': 'echo "hello world"'
             },
             user=user
         )

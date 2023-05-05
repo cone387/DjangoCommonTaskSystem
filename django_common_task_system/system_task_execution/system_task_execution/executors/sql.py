@@ -12,13 +12,13 @@ class SqlExecutor(BaseExecutor):
 
     def execute(self):
         result = []
-        commands = self.schedule.task.config.get('sql', '').split(';')
+        commands = self.schedule.task.config.get('script', '').split(';')
         with connection.cursor() as cursor:
             for sql in commands:
                 sql = sql.strip()
                 if sql:
                     cmd_result = {
-                        'sql': sql,
+                        'script': sql,
                         'result': cursor.execute(sql)
                     }
                     result.append(cmd_result)

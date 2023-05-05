@@ -8,6 +8,11 @@ from django_common_task_system.forms import TaskScheduleProducerForm, TaskSchedu
 
 
 class SystemTaskForm(forms.ModelForm):
+    config = forms.JSONField(
+        label='配置',
+        widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
+        required=False,
+    )
     queue = forms.ModelChoiceField(
         queryset=models.SystemScheduleQueue.objects.all(),
         required=False,
@@ -15,26 +20,35 @@ class SystemTaskForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-control'})
     )
 
+    script = forms.CharField(
+        label='脚本',
+        widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
+        required=False
+    )
+
     def __init__(self, *args, **kwargs):
         super(SystemTaskForm, self).__init__(*args, **kwargs)
         if self.instance.id:
-            if self.instance.parent is not None and \
-                    self.instance.parent == models.builtins.tasks.sql_produce_parent_task:
-                self.fields['queue'].initial = models.SystemScheduleQueue.objects.get(
+            parent = self.instance.parent
+            if parent == models.builtins.tasks.sql_produce_parent_task:
+                self.initial['queue'] = models.SystemScheduleQueue.objects.get(
                     code=self.instance.config.get('queue')
                 )
+            self.initial['script'] = self.instance.config.get('script')
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()
         parent = cleaned_data.get('parent')
         required_fields = parent.config.get('required_fields', []) if parent else []
         config = cleaned_data.get('config', {})
-        queue = cleaned_data.pop('queue')
-        if queue:
-            config['queue'] = queue.code
         for field in required_fields:
-            if not config.get(field):
-                self.add_error('config', '%s不能为空' % field)
+            value = cleaned_data.pop(field, None)
+            if not value:
+                self.add_error('name', '%s不能为空' % field)
+            if field == 'queue':
+                config[field] = value.code
+            else:
+                config[field] = value
         return cleaned_data
 
     class Meta:
@@ -72,8 +86,7 @@ class SystemProcessForm(forms.ModelForm):
         super(SystemProcessForm, self).__init__(*args, **kwargs)
         if not self.instance.id:
             logs_path = os.path.join(os.getcwd(), 'logs')
-            self.initial['log_file'] = os.path.join(logs_path,
-                                                    'system-process-%s.log' % time.strftime('%Y%m%d%H%M%S'))
+            self.initial['log_file'] = os.path.join(logs_path, 'system-process-%s.log' % time.strftime('%Y%m%d%H%M%S'))
 
     def clean(self):
         cleaned_data = super(SystemProcessForm, self).clean()

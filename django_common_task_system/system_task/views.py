@@ -68,7 +68,7 @@ class ScheduleProduceView(APIView):
             schedule = SystemSchedule.objects.get(id=pk)
         except SystemSchedule.DoesNotExist:
             return Response({'message': 'schedule_id(%s)不存在' % pk}, status=status.HTTP_404_NOT_FOUND)
-        sql: str = schedule.task.config.get('sql', '').strip()
+        sql: str = schedule.task.config.get('script', '').strip()
         if not sql:
             return Response({'message': 'sql语句不能为空'}, status=status.HTTP_400_BAD_REQUEST)
         if not sql.startswith('select'):

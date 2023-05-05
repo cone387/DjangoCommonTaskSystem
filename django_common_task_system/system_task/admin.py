@@ -50,9 +50,10 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
     list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
 
     fields = (
-        ("parent", 'category',),
-        ('queue',),
+        'category',
         ("name", "status",),
+        ("parent", 'queue'),
+        "script",
         "config",
         'description',
     )
@@ -60,9 +61,17 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
     list_filter = ('category', 'parent')
 
     def has_delete_permission(self, request, obj=None):
-        if obj:
+        if obj and not request.user.is_superuser:
             return obj.category != models.builtins.categories.system_default_category
         return True
+
+    class Media:
+        js = (
+            'https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js',
+            'https://cdn.bootcss.com/popper.js/1.14.3/umd/popper.min.js',
+            'https://cdn.bootcss.com/bootstrap/4.1.3/js/bootstrap.min.js',
+            'common_task_system/js/task_type_admin.js',
+        )
 
 
 class SystemScheduleCallbackAdmin(base_admin.TaskScheduleCallbackAdmin):
@@ -80,7 +89,7 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
     list_filter = ('task__category', )
 
     def has_delete_permission(self, request, obj=None):
-        if obj:
+        if obj and not request.user.is_superuser:
             return obj.task.category != models.builtins.categories.system_default_category
         return True
 
