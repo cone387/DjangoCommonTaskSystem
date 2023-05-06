@@ -30,6 +30,7 @@ def request_system_schedule(url):
         tags = task.pop('tags', None)
         user = result.pop('user', None)
         queue = result.pop('queue', None)
+        generator = result.pop('generator', None)
         parent = task.pop('parent', None)
         if parent:
             parent.pop('category')
@@ -42,6 +43,7 @@ def request_system_schedule(url):
             **result
         )
         schedule.queue = queue
+        schedule.generator = generator
         return schedule
         # system_task_queue.put(schedule)
 
