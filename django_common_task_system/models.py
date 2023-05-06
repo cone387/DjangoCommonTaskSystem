@@ -440,6 +440,7 @@ class AbstractTaskSchedule(models.Model):
     config = fields.ScheduleConfigField(default=dict, verbose_name='参数')
     status = common_fields.CharField(default=TaskScheduleStatus.OPENING.value, verbose_name='状态',
                                      choices=TaskScheduleStatus.choices)
+    strict_mode = models.BooleanField(default=False, verbose_name='严格模式')
     callback = models.ForeignKey(TaskScheduleCallback, on_delete=models.CASCADE,
                                  null=True, blank=True, db_constraint=False, verbose_name='回调')
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
@@ -684,6 +685,12 @@ class BaseBuiltinQueues(BuiltinModels):
 
     def __init__(self):
         super(BaseBuiltinQueues, self).__init__()
+        self.strict = self.model(
+            code='strict',
+            status=True,
+            module=ScheduleQueueModule.QUEUE.value,
+            name='严格计划队列',
+        )
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
@@ -722,8 +729,17 @@ class BuiltinQueues(BaseBuiltinQueues):
 class BaseBuiltinProducers(BuiltinModels):
     model_unique_kwargs = ['queue']
 
-    def __init__(self):
+    def __init__(self, queues: BuiltinQueues):
         super(BaseBuiltinProducers, self).__init__()
+        self.strict = self.model(
+            queue=queues.strict,
+            lte_now=True,
+            filters={
+                'strict_mode': True,
+            },
+            status=True,
+            name='严格计划生产'
+        )
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
@@ -761,7 +777,8 @@ class BuiltinProducers(BaseBuiltinProducers):
             status=True,
             name='测试'
         )
-        super(BuiltinProducers, self).__init__()
+
+        super(BuiltinProducers, self).__init__(queues)
 
 
 class BaseConsumerPermissions(BuiltinModels):
