@@ -82,14 +82,14 @@ class TaskScheduleAdmin(UserAdmin):
     queues = models.builtins.queues
     schedule_put_name = 'task_schedule_put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
-                    'status', 'put', 'logs', 'update_time')
+                    'status', 'strict_mode', 'put', 'logs', 'update_time')
     change_list_template = 'admin/system_schedule/change_list.html'
     # readonly_fields = ("next_schedule_time", )
 
     fields = (
         ("task", "status"),
         "nlp_sentence",
-        ("schedule_type", 'priority', 'base_on_now'),
+        ("schedule_type", 'priority', 'base_on_now', 'strict_mode'),
         "period_schedule",
         "once_schedule",
         "crontab",
@@ -202,6 +202,7 @@ class TaskScheduleAdmin(UserAdmin):
 class TaskScheduleLogAdmin(UserAdmin):
     schedule_retry_name = 'task_schedule_retry'
     list_display = ('id', 'schedule', 'status', 'retry', 'schedule_time', 'create_time')
+    list_filter = ('status', 'schedule')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]

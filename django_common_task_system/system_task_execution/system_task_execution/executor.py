@@ -9,8 +9,8 @@ from django.urls import reverse
 from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
-from django_common_task_system.system_task.models import SystemSchedule, SystemTask, builtins, SystemExceptionReport
-from django_common_task_system.models import TaskScheduleCallback
+from .utils import to_model
+from django_common_task_system.system_task.models import SystemSchedule, builtins, SystemExceptionReport
 
 
 IP = socket.gethostbyname(socket.gethostname())
@@ -22,30 +22,11 @@ def request_system_schedule(url):
     response = requests.get(url)
     if response.status_code == 200:
         result = response.json()
-        callback = result.pop('callback')
-        if callback:
-            callback = TaskScheduleCallback(**callback)
-        task = result.pop('task')
-        category = task.pop('category')
-        tags = task.pop('tags', None)
-        user = result.pop('user', None)
-        queue = result.pop('queue', None)
-        generator = result.pop('generator', None)
-        parent = task.pop('parent', None)
-        if parent:
-            parent.pop('category')
-            parent.pop('tags')
-            parent = SystemTask(**parent)
         result['next_schedule_time'] = datetime.strptime(result.pop('schedule_time'), '%Y-%m-%d %H:%M:%S')
-        schedule = SystemSchedule(
-            task=SystemTask(parent=parent, **task),
-            callback=callback,
-            **result
-        )
-        schedule.queue = queue
-        schedule.generator = generator
+        schedule = to_model(result, SystemSchedule)
+        schedule.queue = result.pop('queue', None)
+        schedule.generator = result.pop('generator', None)
         return schedule
-        # system_task_queue.put(schedule)
 
 
 def get_system_schedule(url):
@@ -58,12 +39,10 @@ def get_system_schedule(url):
 
 def get_schedule_executor(schedule):
     try:
-        if not schedule.task.parent:
-            raise KeyError
-        cls = Executors[schedule.task.parent.name]
+        cls = Executors[schedule.task.name]
     except KeyError:
         try:
-            cls = Executors[schedule.task.name]
+            cls = Executors[schedule.task.parent.name]
         except KeyError:
             raise RuntimeError('executor not found for task name: %s' % schedule.task.name)
     return cls(schedule)

@@ -293,6 +293,21 @@ class BuiltinTasks(BuiltinModels):
             },
             user=user
         )
+
+        for cls in AbstractTaskSchedule.__subclasses__():
+            m = self.model(
+                name="[%s]严格模式任务" % cls.__name__,
+                parent=self.sql_produce_parent_task,
+                category=categories.system_default_category,
+                user=user,
+                config={
+                    'script': "select * from %s where status = '%s' and strict_mode = 1 limit 1000;" % (
+                        cls._meta.db_table, TaskScheduleStatus.OPENING.value,),
+                    'queue': queues.opening.code,
+                    'include_meta': True,
+                }
+            )
+            setattr(self, "strict_" + cls.__name__.lower(), m)
         super(BuiltinTasks, self).__init__()
 
 
@@ -360,14 +375,12 @@ class BuiltinSchedules(BuiltinModels):
         )
 
         config = {
-            'config': {
-                "S": {
-                    "period": 60,
-                    "schedule_start_time": "2023-04-04 15:31:00"
-                },
-                "base_on_now": True,
-                "schedule_type": "S"
-            }
+            "S": {
+                "period": 60,
+                "schedule_start_time": "2023-04-04 15:31:00"
+            },
+            "base_on_now": True,
+            "schedule_type": "S"
         }
 
         self.test_sql_execution = self.model(
@@ -389,6 +402,23 @@ class BuiltinSchedules(BuiltinModels):
             config=config
         )
 
+        for cls in AbstractTaskSchedule.__subclasses__():
+            task = getattr(tasks, "strict_" + cls.__name__.lower(), None)
+            if task is not None:
+                m = self.model(
+                    task=task,
+                    user=user,
+                    status=TaskScheduleStatus.OPENING.value,
+                    config={
+                        "S": {
+                            "period": 60 * 60,
+                            "schedule_start_time": "2023-04-04 15:31:00"
+                        },
+                        "base_on_now": True,
+                        "schedule_type": "S"
+                    }
+                )
+                setattr(self, "strict_" + cls.__name__.lower(), m)
         super(BuiltinSchedules, self).__init__()
 
 

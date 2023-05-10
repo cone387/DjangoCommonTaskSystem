@@ -13,6 +13,7 @@ from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleTh
 from .models import builtins
 from .serializers import QueueScheduleSerializer, ExceptionSerializer
 import os
+import copy
 
 
 builtins.initialize()
@@ -65,7 +66,7 @@ class ScheduleProduceView(APIView):
 
     def post(self, request: Request, pk: int):
         try:
-            schedule = SystemSchedule.objects.get(id=pk)
+            schedule = SystemSchedule.objects.select_related('task').get(id=pk)
         except SystemSchedule.DoesNotExist:
             return Response({'message': 'schedule_id(%s)不存在' % pk}, status=status.HTTP_404_NOT_FOUND)
         sql: str = schedule.task.config.get('script', '').strip()
@@ -79,6 +80,15 @@ class ScheduleProduceView(APIView):
             if queue.qsize() > max_size:
                 return Response({'message': '队列(%s)已满(%s)' % (schedule.task.config['queue'], max_size)},
                                 status=status.HTTP_400_BAD_REQUEST)
+            schedule.task.name = schedule.task.name + "-生产的任务"
+            if schedule.task.config.get('include_meta'):
+                def produce(item):
+                    schedule.task.config['content'] = item
+                    queue.put(QueueScheduleSerializer(schedule).data)
+            else:
+                def produce(item):
+                    item['task_name'] = schedule.task.name
+                    queue.put(item)
             with connection.cursor() as cursor:
                 cursor.execute(sql)
                 rows = cursor.fetchall()
@@ -88,7 +98,7 @@ class ScheduleProduceView(APIView):
                     obj = {}
                     for index, value in enumerate(row):
                         obj[col_names[index]] = value
-                    queue.put(obj)
+                    produce(obj)
         except Exception as e:
             return Response({'message': 'sql语句执行失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': '成功产生%s条数据' % nums})

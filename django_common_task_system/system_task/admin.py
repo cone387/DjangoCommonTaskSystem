@@ -52,7 +52,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
     fields = (
         'category',
         ("name", "status",),
-        ("parent", 'queue'),
+        ("parent", 'queue', 'include_meta'),
         "script",
         "config",
         'description',
@@ -84,8 +84,6 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
     schedule_log_model = models.SystemScheduleLog
     queues = models.builtins.queues
     schedule_put_name = 'system_schedule_put'
-    list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
-                    'status', 'put', 'logs', 'update_time')
     list_filter = ('task__category', )
 
     def has_delete_permission(self, request, obj=None):

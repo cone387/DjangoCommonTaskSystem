@@ -685,12 +685,6 @@ class BaseBuiltinQueues(BuiltinModels):
 
     def __init__(self):
         super(BaseBuiltinQueues, self).__init__()
-        self.strict = self.model(
-            code='strict',
-            status=True,
-            module=ScheduleQueueModule.QUEUE.value,
-            name='严格计划队列',
-        )
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
@@ -729,17 +723,8 @@ class BuiltinQueues(BaseBuiltinQueues):
 class BaseBuiltinProducers(BuiltinModels):
     model_unique_kwargs = ['queue']
 
-    def __init__(self, queues: BuiltinQueues):
+    def __init__(self):
         super(BaseBuiltinProducers, self).__init__()
-        self.strict = self.model(
-            queue=queues.strict,
-            lte_now=True,
-            filters={
-                'strict_mode': True,
-            },
-            status=True,
-            name='严格计划生产'
-        )
         for m in self.model.objects.filter(status=True):
             self.add(m)
 
@@ -778,7 +763,7 @@ class BuiltinProducers(BaseBuiltinProducers):
             name='测试'
         )
 
-        super(BuiltinProducers, self).__init__(queues)
+        super(BuiltinProducers, self).__init__()
 
 
 class BaseConsumerPermissions(BuiltinModels):

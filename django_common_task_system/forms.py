@@ -324,6 +324,15 @@ class TaskScheduleForm(forms.ModelForm):
         cleaned_data['next_schedule_time'] = schedule.get_current_time(
             start_time=cleaned_data.get('schedule_start_time', None)
         )
+        base_on_now = cleaned_data.get('base_on_now', False)
+        strict_mode = cleaned_data.get('strict_mode', False)
+        if strict_mode and base_on_now:
+            raise forms.ValidationError("严格模式下不允许基于当前时间")
+        if self.instance.id:
+            if self.instance.config != schedule.config:
+                schedule.config['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            schedule.config['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         return cleaned_data
 
     class Meta:

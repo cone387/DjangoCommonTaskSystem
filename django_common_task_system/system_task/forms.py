@@ -20,6 +20,12 @@ class SystemTaskForm(forms.ModelForm):
         widget=forms.Select(attrs={'class': 'form-control'})
     )
 
+    include_meta = forms.BooleanField(
+        label='包含元数据',
+        required=False,
+        initial=True
+    )
+
     script = forms.CharField(
         label='脚本',
         widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
@@ -35,6 +41,7 @@ class SystemTaskForm(forms.ModelForm):
                     code=self.instance.config.get('queue')
                 )
             self.initial['script'] = self.instance.config.get('script')
+            self.initial['include_meta'] = self.instance.config.get('include_meta')
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()

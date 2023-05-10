@@ -1,6 +1,7 @@
 from . shell import ShellExecutor
 from . sql import SqlExecutor, SqlProduceExecutor
 from .exception import SystemExceptionExecutor, ScheduleExceptionExecutor
+from .strict_schedule import StrictScheduleDaemonExecutor
 
 
 Executors = {
@@ -9,4 +10,5 @@ Executors = {
     ShellExecutor.name: ShellExecutor,
     SystemExceptionExecutor.name: SystemExceptionExecutor,
     ScheduleExceptionExecutor.name: ScheduleExceptionExecutor,
+    **{x: StrictScheduleDaemonExecutor for x in StrictScheduleDaemonExecutor.names}
 }
