@@ -3,7 +3,7 @@ from django.db import connection
 from django.shortcuts import reverse
 from .. import settings
 from urllib.parse import urljoin
-from django_common_task_system.system_task.models import builtins
+from django_common_task_system.system_task.builtins import builtins
 import requests
 
 

@@ -1,5 +1,5 @@
 from .base import BaseExecutor
-from django_common_task_system.system_task.models import builtins
+from django_common_task_system.system_task.builtins import builtins
 import sys
 import subprocess
 

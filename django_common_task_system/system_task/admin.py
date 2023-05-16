@@ -4,6 +4,7 @@ from django.shortcuts import reverse
 from django.utils.html import format_html
 from django.db.models.signals import post_delete
 from . import models
+from .builtins import builtins
 from . import forms
 from .. import admin as base_admin
 from .process import ProcessManager
@@ -27,14 +28,8 @@ def init_system_process():
     instance.save()
 
 
-def init_system_data():
-    from .models import builtins
-    builtins.initialize()
-
-
 if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
     init_system_process()
-    init_system_data()
 
 
 @receiver(post_delete, sender=models.SystemProcess)
@@ -62,7 +57,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
 
     def has_delete_permission(self, request, obj=None):
         if obj and not request.user.is_superuser:
-            return obj.category != models.builtins.categories.system_default_category
+            return obj.category != builtins.categories.system_default_category
         return True
 
     class Media:
@@ -82,13 +77,13 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
 
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
-    queues = models.builtins.queues
+    queues = builtins.queues
     schedule_put_name = 'system_schedule_put'
     list_filter = ('task__category', )
 
     def has_delete_permission(self, request, obj=None):
         if obj and not request.user.is_superuser:
-            return obj.task.category != models.builtins.categories.system_default_category
+            return obj.task.category != builtins.categories.system_default_category
         return True
 
 
@@ -130,14 +125,14 @@ class SystemProcessAdmin(admin.ModelAdmin):
 
 class SystemScheduleQueueAdmin(base_admin.TaskScheduleQueueAdmin):
     form = forms.SystemScheduleQueueForm
-    builtins = models.builtins
+    builtins = builtins
     schedule_get_name = 'system_schedule_get'
 
 
 class SystemScheduleProducerAdmin(base_admin.TaskScheduleProducerAdmin):
     form = forms.SystemScheduleProducerForm
     schedule_get_name = 'system_schedule_get'
-    builtins = models.builtins
+    builtins = builtins
 
 
 class SystemConsumerPermissionAdmin(base_admin.ConsumerPermissionAdmin):

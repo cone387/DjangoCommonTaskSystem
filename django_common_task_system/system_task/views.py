@@ -10,10 +10,9 @@ from django_common_task_system.models import system_initialize_signal
 from .models import SystemScheduleQueue, SystemSchedule, \
     SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport
 from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread, ExceptionReportView
-from .models import builtins
+from .builtins import builtins
 from .serializers import QueueScheduleSerializer, ExceptionSerializer
 import os
-import copy
 
 
 builtins.initialize()

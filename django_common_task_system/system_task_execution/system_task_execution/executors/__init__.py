@@ -10,5 +10,5 @@ Executors = {
     ShellExecutor.name: ShellExecutor,
     SystemExceptionExecutor.name: SystemExceptionExecutor,
     ScheduleExceptionExecutor.name: ScheduleExceptionExecutor,
-    **{x: StrictScheduleDaemonExecutor for x in StrictScheduleDaemonExecutor.names}
+    StrictScheduleDaemonExecutor.name: StrictScheduleDaemonExecutor,
 }

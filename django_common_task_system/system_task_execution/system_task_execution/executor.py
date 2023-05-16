@@ -10,7 +10,8 @@ from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
 from .utils import to_model
-from django_common_task_system.system_task.models import SystemSchedule, builtins, SystemExceptionReport
+from django_common_task_system.system_task.models import SystemSchedule, SystemExceptionReport
+from django_common_task_system.system_task.builtins import builtins
 
 
 IP = socket.gethostbyname(socket.gethostname())

@@ -2,7 +2,8 @@ from django.urls import reverse
 import requests
 from .base import BaseExecutor
 from django.db import connection
-from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule, builtins
+from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
+from django_common_task_system.system_task.builtins import builtins
 from django_common_task_system import get_task_schedule_model, get_schedule_log_model
 from django_common_task_system.models import ScheduleConfig
 from .. import settings

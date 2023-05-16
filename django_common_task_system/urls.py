@@ -15,7 +15,7 @@ urlpatterns = [
     path('schedule/detail/<int:pk>/', views.TaskScheduleDetailView.as_view()),
     path('schedule/queue/<slug:code>/get/', views.TaskScheduleQueueAPI.get, name='task_schedule_get'),
     path('schedule/queue/detail/<int:pk>/', views.TaskScheduleQueueAPI.get_by_id),
-    path('schedule/queue/status/', views.TaskScheduleQueueAPI.status),
+    path('schedule/queue/status/', views.TaskScheduleQueueAPI.status, name='task_schedule_status'),
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/report/', views.ExceptionReportView.as_view()),
 ] + router.urls

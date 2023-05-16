@@ -251,10 +251,9 @@ class TaskScheduleQueueAPI(object):
         except Exception as e:
             return JsonResponse({'error': '添加到队列失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
-    @staticmethod
-    @api_view(['GET'])
-    def status(request):
-        return Response({x: y.queue.qsize() for x, y in builtins.queues.items()})
+    @classmethod
+    def status(cls, request):
+        return JsonResponse({x: y.queue.qsize() for x, y in cls.queues.items()})
 
 
 class ScheduleTimeParseView(APIView):

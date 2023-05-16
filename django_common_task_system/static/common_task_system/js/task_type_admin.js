@@ -22,6 +22,11 @@ $(document).ready(function () {
     }else if (parentTask === "Shell执行") {
         $produceQueue.hide();
         $taskScriptInput.attr('placeholder', "请输入shell命令，多个命令用;分隔");
+    }else if (parentTask === "严格模式计划处理"){
+        $produceQueue.show();
+        $includeMeta.hide();
+        $taskScriptField.hide();
+        $config.show();
     }else{
         $config.show();
         $taskScriptField.hide();

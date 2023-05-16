@@ -4,19 +4,21 @@ import os
 import time
 from .process import ProcessManager
 from ..system_task_execution.main import start_system_client
+from django_common_objects.widgets import JSONWidget
 from django_common_task_system.forms import TaskScheduleProducerForm, TaskScheduleQueueForm
+from .builtins import builtins
 
 
 class SystemTaskForm(forms.ModelForm):
     config = forms.JSONField(
         label='配置',
-        widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
+        widget=JSONWidget(attrs={'style': 'width: 70%;'}),
         required=False,
     )
     queue = forms.ModelChoiceField(
         queryset=models.SystemScheduleQueue.objects.all(),
         required=False,
-        label='队列',
+        label='任务队列',
         widget=forms.Select(attrs={'class': 'form-control'})
     )
 
@@ -35,11 +37,9 @@ class SystemTaskForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super(SystemTaskForm, self).__init__(*args, **kwargs)
         if self.instance.id:
-            parent = self.instance.parent
-            if parent == models.builtins.tasks.sql_produce_parent_task:
-                self.initial['queue'] = models.SystemScheduleQueue.objects.get(
-                    code=self.instance.config.get('queue')
-                )
+            queue = self.instance.config.get('queue')
+            if queue:
+                self.initial['queue'] = models.SystemScheduleQueue.objects.get(code=queue)
             self.initial['script'] = self.instance.config.get('script')
             self.initial['include_meta'] = self.instance.config.get('include_meta')
 
@@ -52,6 +52,7 @@ class SystemTaskForm(forms.ModelForm):
             value = cleaned_data.pop(field, None)
             if not value:
                 self.add_error('name', '%s不能为空' % field)
+                break
             if field == 'queue':
                 config[field] = value.code
             else:
