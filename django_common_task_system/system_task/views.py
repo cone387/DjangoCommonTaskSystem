@@ -100,7 +100,7 @@ class ScheduleProduceView(APIView):
                     produce(obj)
         except Exception as e:
             return Response({'message': 'sql语句执行失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'message': '成功产生%s条数据' % nums})
+        return Response({'message': '成功产生%s条数据' % nums, 'nums': nums})
 
 
 class SystemScheduleQueueAPI(TaskScheduleQueueAPI):

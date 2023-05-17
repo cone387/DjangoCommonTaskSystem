@@ -1,6 +1,10 @@
 from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
 
 
+class EmptyResult(Exception):
+    pass
+
+
 class BaseExecutor(object):
     name = None
 
@@ -17,6 +21,9 @@ class BaseExecutor(object):
         err = None
         try:
             log.result['result'] = self.execute()
+        except EmptyResult as e:
+            log.status = 'E'    # E: empty result
+            log.result['msg'] = str(e)
         except Exception as e:
             log.result['error'] = str(e)
             log.status = 'F'    # F: failed

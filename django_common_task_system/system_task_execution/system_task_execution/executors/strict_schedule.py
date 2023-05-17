@@ -1,6 +1,6 @@
 from typing import Union
 from django.urls import reverse
-from .base import BaseExecutor
+from .base import BaseExecutor, EmptyResult
 from datetime import datetime, timedelta
 from django.db import connection
 from django.utils.module_loading import import_string
@@ -102,16 +102,31 @@ def get_producer_of_schedule(schedule: AbstractTaskSchedule) -> Union[AbstractTa
 
 
 def get_schedule_times(schedule: AbstractTaskSchedule, start_date=None, end_date=None):
+    schedule_times = []
+    schedule_config = ScheduleConfig(config=schedule.config)
+    if not start_date:
+        update_time = schedule.config.get('update_time')
+        if update_time:
+            update_time = datetime.strptime(update_time, '%Y-%m-%d %H:%M:%S')
+        else:
+            update_time = datetime.now() - timedelta(days=30)
+        start_date = schedule.config[schedule.config['schedule_type']].get('schedule_start_time', None)
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
+            while start_date < update_time:
+                start_date = schedule_config.get_next_time(start_date)
+        else:
+            start_date = update_time
     start_date = start_date or schedule.config.get('update_time', datetime.now() - timedelta(days=30))
     end_date = end_date or datetime.now()
     if isinstance(start_date, str):
         start_date = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
     if isinstance(end_date, str):
         end_date = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
-    schedule_times = []
-    schedule_config = ScheduleConfig(config=schedule.config)
-    while start_date < end_date:
+    while True:
         start_date = schedule_config.get_next_time(start_date)
+        if start_date >= end_date:
+            break
         schedule_times.append(start_date)
     return schedule_times
 
@@ -138,7 +153,7 @@ class StrictScheduleDaemonExecutor(BaseExecutor):
         for strict_schedule in schedule_model.objects.filter(
             strict_mode=True,
             status=TaskScheduleStatus.OPENING.value,
-        ):
+        ).select_related(*task_config['related']):
             producer = get_producer_of_schedule(strict_schedule)
             if not producer:
                 error = "producer not found for %s" % strict_schedule
@@ -200,18 +215,19 @@ class StrictScheduleDaemonExecutor(BaseExecutor):
             command = f"""
                 select a.date from ({schedule_date_command}) a 
                 left join (
-                    select schedule_time, count(status='S' or null) as succeed, 
+                    select schedule_time, count(status != 'F' or null) as succeed, 
                         count(status='F' or null) as failed from {schedule_log_model._meta.db_table} where 
                         schedule_id = {strict_schedule.id} and 
                         schedule_time between '{start_date}' and '{end_date}'
                         group by schedule_time
-                ) b on a.date = b.schedule_time where b.succeed = 0 or b.failed > {max_failed_times}
+                ) b 
+                on a.date = b.schedule_time where b.succeed is null or (b.succeed = 0 and b.failed < {max_failed_times})
             """
             missing_datetimes = []
             time = strict_schedule.config[strict_schedule.config['schedule_type']].get('time', '03:00:00')
             with connection.cursor() as cursor:
                 cursor.execute(command)
-                for d in cursor.fetchall():
+                for d, *_ in cursor.fetchall():
                     # 根据日志查出来的遗漏日期就是实际的日期，不需要根据latest_days来计算
                     if len(d) == 10:
                         d = d + ' ' + time
@@ -224,4 +240,6 @@ class StrictScheduleDaemonExecutor(BaseExecutor):
                 logger.info("%s no missing times" % strict_schedule)
         if error:
             raise ValueError(error)
+        if not result:
+            raise EmptyResult("no strict schedule need to be executed")
         return result

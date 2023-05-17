@@ -6,14 +6,15 @@ from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from datetime import datetime
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
-from . import models, forms, get_task_model, get_schedule_log_model
+from . import models, forms, get_task_model, get_schedule_log_model, get_task_schedule_model
 
 TaskModel = get_task_model()
+ScheduleModel = get_task_schedule_model()
 TaskScheduleLogModel = get_schedule_log_model()
 
 
 class TaskAdmin(UserAdmin):
-    schedule_model = models.TaskSchedule
+    schedule_model = ScheduleModel
 
     form = forms.TaskForm
     list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
@@ -82,7 +83,7 @@ class TaskScheduleAdmin(UserAdmin):
     queues = models.builtins.queues
     schedule_put_name = 'task_schedule_put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
-                    'status', 'strict_mode', 'put', 'logs', 'update_time')
+                    'status', 'strict', 'put', 'logs', 'update_time')
     change_list_template = 'admin/system_schedule/change_list.html'
     # readonly_fields = ("next_schedule_time", )
 
@@ -106,6 +107,11 @@ class TaskScheduleAdmin(UserAdmin):
     )
     form = forms.TaskScheduleForm
 
+    def strict(self, obj):
+        return '是' if obj.strict_mode else '否'
+    strict.boolean = False
+    strict.short_description = '严格模式'
+
     def admin_task(self, obj):
         return format_html('<a href="/admin/%s/%s/%s/change/">%s</a>' % (
             obj._meta.app_label, self.task_model._meta.model_name, obj.task.id, obj.task.name
@@ -127,7 +133,7 @@ class TaskScheduleAdmin(UserAdmin):
         return '-'
     schedule_type.short_description = '计划类型'
 
-    def schedule_sub_type(self, obj: models.TaskSchedule):
+    def schedule_sub_type(self, obj: ScheduleModel):
         config = obj.config
         schedule_type = config.get("schedule_type", "-")
         type_config = config.get(schedule_type, {})
@@ -305,7 +311,7 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 admin.site.register(TaskModel, TaskAdmin)
-admin.site.register(models.TaskSchedule, TaskScheduleAdmin)
+admin.site.register(ScheduleModel, TaskScheduleAdmin)
 admin.site.register(models.TaskScheduleCallback, TaskScheduleCallbackAdmin)
 admin.site.register(TaskScheduleLogModel, TaskScheduleLogAdmin)
 admin.site.register(models.TaskScheduleQueue, TaskScheduleQueueAdmin)

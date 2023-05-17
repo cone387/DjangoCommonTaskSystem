@@ -223,34 +223,19 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_default_category,
             user=user,
             config={
-                'queue': queues.opening.code,
                 'model': SystemSchedule.__module__ + "." + SystemSchedule.__name__,
-                'serializer': TaskScheduleSerializer.__module__ + "." + TaskScheduleSerializer.__name__,
-                'filters': {
-                    "strict_mode": True,
-                    'status': TaskScheduleStatus.OPENING.value,
-                },
                 'related': ['task', 'callback'],
-                'include_meta': True,
             }
         )
         task_schedule = get_task_schedule_model()
-        serializer = get_task_schedule_serializer()
         self.task_strict_schedule_process = self.model(
             name='普通任务严格模式任务处理',
             parent=self.strict_schedule_parent_task,
             category=categories.system_default_category,
             user=user,
             config={
-                'queue': queues.opening.code,
                 'model': task_schedule.__module__ + "." + task_schedule.__name__,
-                'serializer': serializer.__module__ + "." + serializer.__name__,
-                'filters': {
-                    "strict_mode": True,
-                    'status': TaskScheduleStatus.OPENING.value,
-                },
                 'related': get_model_related(task_schedule, excludes=[UserModel, CommonCategory]),
-                'include_meta': True,
             }
         )
         super(BuiltinTasks, self).__init__()

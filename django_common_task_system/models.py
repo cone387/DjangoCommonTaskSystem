@@ -4,7 +4,7 @@ from django.db import models
 from django.utils.module_loading import import_string
 from .choices import TaskStatus, TaskScheduleStatus, TaskScheduleType, TaskCallbackStatus, \
     TaskCallbackEvent, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
-from django_common_objects.models import CommonTag, CommonCategory, get_default_config
+from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
 from .utils.cron_utils import get_next_cron_time
 from .utils import foreign_key
@@ -20,6 +20,7 @@ from django.core.validators import ValidationError
 from django.dispatch import Signal, receiver
 from threading import Event
 from collections import OrderedDict
+from django.db.utils import ProgrammingError
 
 system_initialize_signal = Signal()
 system_schedule_event = Event()
@@ -66,8 +67,7 @@ class AbstractTask(models.Model):
     category = models.ForeignKey(CommonCategory, db_constraint=False, on_delete=models.DO_NOTHING, verbose_name='类别')
     tags = models.ManyToManyField(CommonTag, blank=True, db_constraint=False, verbose_name='标签')
     description = models.TextField(blank=True, null=True, verbose_name='描述')
-    config = common_fields.ConfigField(default=get_default_config('Task'),
-                                       blank=True, null=True, verbose_name='参数')
+    config = common_fields.ConfigField(blank=True, null=True, verbose_name='参数')
     status = common_fields.CharField(max_length=1, default=TaskStatus.ENABLE.value, verbose_name='状态',
                                      choices=TaskStatus.choices)
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
@@ -105,8 +105,7 @@ class AbstractScheduleCallback(models.Model):
                                             verbose_name='触发事件')
     status = common_fields.CharField(default=TaskCallbackStatus.ENABLE.value, verbose_name='状态',
                                      choices=TaskCallbackStatus.choices)
-    config = common_fields.ConfigField(default=get_default_config('TaskCallback'), blank=True, null=True,
-                                       verbose_name='参数')
+    config = common_fields.ConfigField(blank=True, null=True, verbose_name='参数')
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
@@ -685,8 +684,11 @@ class BaseBuiltinQueues(BuiltinModels):
 
     def __init__(self):
         super(BaseBuiltinQueues, self).__init__()
-        for m in self.model.objects.filter(status=True):
-            self.add(m)
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except ProgrammingError:
+            pass
 
     def add(self, instance: AbstractTaskScheduleQueue, key=None):
         if instance.status:
@@ -725,8 +727,11 @@ class BaseBuiltinProducers(BuiltinModels):
 
     def __init__(self):
         super(BaseBuiltinProducers, self).__init__()
-        for m in self.model.objects.filter(status=True):
-            self.add(m)
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except ProgrammingError:
+            pass
 
     def add(self, instance: AbstractTaskScheduleProducer, key=None):
         if instance.status:
@@ -772,8 +777,11 @@ class BaseConsumerPermissions(BuiltinModels):
 
     def __init__(self):
         super(BaseConsumerPermissions, self).__init__()
-        for m in self.model.objects.filter(status=True):
-            self.add(m)
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except ProgrammingError:
+            pass
 
     def add(self, instance: AbstractConsumerPermission, key=None):
         if instance.status:

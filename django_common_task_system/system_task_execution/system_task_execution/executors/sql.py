@@ -1,4 +1,4 @@
-from .base import BaseExecutor
+from .base import BaseExecutor, EmptyResult
 from django.db import connection
 from django.shortcuts import reverse
 from .. import settings
@@ -31,4 +31,10 @@ class SqlProduceExecutor(BaseExecutor):
     def execute(self):
         url = reverse('system_schedule_produce', args=(self.schedule.id,))
         res = requests.post(urljoin(settings.HOST, url))
-        return res.json()
+        if res.status_code != 200:
+            raise Exception('produce failed: %s' % res.text)
+        result = res.json()
+        nums = result.get('nums', 0)
+        if nums == 0:
+            raise EmptyResult('produce failed: %s' % res.text)
+        return result

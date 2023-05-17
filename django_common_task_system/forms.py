@@ -7,15 +7,20 @@ from django_common_objects.widgets import JSONWidget
 from .utils import foreign_key
 from datetime import datetime, time as datetime_time
 from . import models
+from . import get_task_schedule_model, get_task_model
+
+
+TaskModel = get_task_model()
+ScheduleModel = get_task_schedule_model()
 
 
 class TaskForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super(TaskForm, self).__init__(*args, **kwargs)
-        task: models.Task = self.instance
+        task: TaskModel = self.instance
         if task.id:
-            self.fields['parent'].queryset = models.Task.objects.filter(
+            self.fields['parent'].queryset = TaskModel.objects.filter(
                 user=task.user
             ).exclude(id__in=foreign_key.get_related_object_ids(task))
 
@@ -336,7 +341,7 @@ class TaskScheduleForm(forms.ModelForm):
         return cleaned_data
 
     class Meta:
-        model = models.TaskSchedule
+        model = ScheduleModel
         fields = "__all__"
 
 
@@ -391,7 +396,7 @@ class TaskScheduleProducerForm(forms.ModelForm):
                 self.add_error('filters', 'filters不能为空')
             else:
                 try:
-                    models.TaskSchedule.objects.filter(**filters).first()
+                    ScheduleModel.objects.filter(**filters).first()
                 except Exception as e:
                     self.add_error('filters', 'filters参数错误: %s' % e)
                 else:

@@ -1,6 +1,6 @@
 from django.urls import reverse
 import requests
-from .base import BaseExecutor
+from .base import BaseExecutor, EmptyResult
 from django.db import connection
 from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
 from django_common_task_system.system_task.builtins import builtins
@@ -43,7 +43,7 @@ class SystemExceptionExecutor(BaseExecutor):
         command = '''
             select * from (
             select queue, schedule_id, schedule_time, count(*) as times, max(create_time) as lastest_time 
-            from %s where create_time > CURDATE() and status != 'S' 
+            from %s where create_time > CURDATE() and status = 'F' 
             GROUP BY queue, schedule_id, schedule_time order by queue, schedule_id, schedule_time
             ) a where a.times < %s and a.lastest_time > '%s' limit %s
         ''' % (self.schedule_log_model._meta.db_table, max_retry_times, last_schedule_time, max_fetch_num,)
@@ -77,6 +77,8 @@ class SystemExceptionExecutor(BaseExecutor):
             batch = rows[i * batch_num: (i + 1) * batch_num]
         if error:
             raise Exception(error)
+        if not result:
+            raise EmptyResult('no task need to handle')
         return result
 
 
