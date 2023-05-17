@@ -9,7 +9,7 @@ def put_schedule(url: str, schedule: AbstractTaskSchedule, queue: str, datetimes
     error = None
     i = 0
     while batch:
-        batch_result = requests.get(url, params={
+        batch_result = requests.post(url, data={
             'i': ','.join([str(schedule.id)] * len(batch)),
             'q': queue,
             't': ','.join(batch)

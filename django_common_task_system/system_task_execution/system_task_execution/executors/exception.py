@@ -65,7 +65,7 @@ class SystemExceptionExecutor(BaseExecutor):
                 queues.append(q)
                 times.append(t.strftime('%Y-%m-%d %H:%M:%S'))
             url = settings.HOST + path
-            batch_result = requests.get(url, params={
+            batch_result = requests.post(url, data={
                 'i': ','.join(ids),
                 'q': ','.join(queues),
                 't': ','.join(times)

@@ -7,8 +7,7 @@ from django_common_task_system.models import (
 from django_common_objects.models import CommonCategory
 from django_common_task_system.system_task.models import SystemTask, SystemScheduleProducer, SystemSchedule, \
     SystemConsumerPermission, SystemScheduleLog, SystemScheduleQueue
-from .serializers import TaskScheduleSerializer
-from django_common_task_system import get_task_schedule_serializer, get_task_model, get_task_schedule_model
+from django_common_task_system import get_schedule_log_model, get_task_schedule_model
 
 
 class BuiltinCategories(BuiltinModels):
@@ -207,8 +206,6 @@ class BuiltinTasks(BuiltinModels):
                 if t == 'ForeignKey' and parent.split("__")[-1] != field.name:
                     if excludes and field.related_model in excludes:
                         continue
-                    if field.name == 'callback':
-                        print()
                     if parent:
                         child = parent + "__" + field.name
                     else:
@@ -223,18 +220,21 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_default_category,
             user=user,
             config={
-                'model': SystemSchedule.__module__ + "." + SystemSchedule.__name__,
+                'schedule_model': SystemSchedule.__module__ + "." + SystemSchedule.__name__,
+                'log_model': SystemScheduleLog.__module__ + "." + SystemScheduleLog.__name__,
                 'related': ['task', 'callback'],
             }
         )
         task_schedule = get_task_schedule_model()
+        log_model = get_schedule_log_model()
         self.task_strict_schedule_process = self.model(
             name='普通任务严格模式任务处理',
             parent=self.strict_schedule_parent_task,
             category=categories.system_default_category,
             user=user,
             config={
-                'model': task_schedule.__module__ + "." + task_schedule.__name__,
+                'schedule_model': task_schedule.__module__ + "." + task_schedule.__name__,
+                'log_model': log_model.__module__ + "." + log_model.__name__,
                 'related': get_model_related(task_schedule, excludes=[UserModel, CommonCategory]),
             }
         )

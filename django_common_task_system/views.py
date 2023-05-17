@@ -14,6 +14,7 @@ from .choices import TaskScheduleStatus
 from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
     ConsumerPermission, ExceptionReport, builtins, ScheduleConfig
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
+from django.views.decorators.csrf import csrf_exempt
 from queue import Empty
 from datetime import datetime
 from jionlp_time import parse_time
@@ -202,10 +203,11 @@ class TaskScheduleQueueAPI(object):
             return JsonResponse({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
     @classmethod
+    @csrf_exempt
     def put(cls, request: Request):
-        schedule_ids = request.GET.get('i', None)
-        queues = request.GET.get('q', None)
-        schedule_times = request.GET.get('t', None)
+        schedule_ids = request.GET.get('i', None) or request.POST.get('i', None)
+        queues = request.GET.get('q', None) or request.POST.get('q', None)
+        schedule_times = request.GET.get('t', None) or request.POST.get('t', None)
         if not schedule_ids or not queues or not schedule_times:
             return JsonResponse({'error': 'schedule_ids(i)、queues(q)、schedule_times(t)不能为空'},
                                 status=status.HTTP_400_BAD_REQUEST)
