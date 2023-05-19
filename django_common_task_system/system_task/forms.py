@@ -2,17 +2,34 @@ from . import models
 from django import forms
 import os
 import time
+import hashlib
 from .process import ProcessManager
 from ..system_task_execution.main import start_system_client
 from django_common_objects.widgets import JSONWidget
-from django_common_task_system.forms import TaskScheduleProducerForm, TaskScheduleQueueForm
-from .builtins import builtins
+from django.conf import settings
+from django_common_task_system.forms import (
+    TaskScheduleProducerForm, TaskScheduleQueueForm, ExecutableFileField
+)
+
+
+class InitialFileStr(str):
+
+    @property
+    def url(self):
+        return self
+
+
+def get_md5(text):
+    md5 = hashlib.md5()
+    md5.update(text.encode('utf-8'))
+    return md5.hexdigest()
 
 
 class SystemTaskForm(forms.ModelForm):
     config = forms.JSONField(
         label='配置',
         widget=JSONWidget(attrs={'style': 'width: 70%;'}),
+        initial={},
         required=False,
     )
     queue = forms.ModelChoiceField(
@@ -33,6 +50,10 @@ class SystemTaskForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
         required=False
     )
+    # 不知道为什么这里使用validators时，在admin新增任务时如果validator没通过，第一次会报错，第二次就不会报错了
+    executable_file = ExecutableFileField(required=False, help_text='仅支持zip、python、shell格式')
+
+    executable_path = os.path.join(settings.STATIC_ROOT or os.path.join(os.getcwd(), 'static'), 'executable')
 
     def __init__(self, *args, **kwargs):
         super(SystemTaskForm, self).__init__(*args, **kwargs)
@@ -42,19 +63,49 @@ class SystemTaskForm(forms.ModelForm):
                 self.initial['queue'] = models.SystemScheduleQueue.objects.get(code=queue)
             self.initial['script'] = self.instance.config.get('script')
             self.initial['include_meta'] = self.instance.config.get('include_meta')
+            executable_file = self.instance.config.get('executable_file')
+            if executable_file:
+                self.initial['executable_file'] = [
+                    InitialFileStr(executable_file.replace(self.executable_path, '')),
+                    self.instance.config.get('executable_args')
+                ]
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()
+        if self.errors:
+            return None
         parent = cleaned_data.get('parent')
         required_fields = parent.config.get('required_fields', []) if parent else []
-        config = cleaned_data.get('config', {})
+        config = cleaned_data.setdefault('config', {})
+        if not config:
+            config = cleaned_data['config'] = {}
         for field in required_fields:
-            value = cleaned_data.pop(field, None)
+            value = cleaned_data.pop(field, None) or config.pop(field, None)
             if not value:
                 self.add_error('name', '%s不能为空' % field)
                 break
             if field == 'queue':
                 config[field] = value.code
+            elif field == 'executable_file':
+                if isinstance(value, str):
+                    config[field] = value
+                    continue
+                max_size = parent.config.get('max_size', 5 * 1024 * 1024)
+                bytesio, args = value
+                if bytesio.size > max_size:
+                    self.add_error('name', '文件大小不能超过%sM' % round(max_size / 1024 / 1024))
+                    break
+                path = os.path.join(self.executable_path, get_md5(cleaned_data['name']))
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                file = os.path.join(path, 'main%s' % os.path.splitext(bytesio.name)[-1])
+                with open(file, 'wb') as f:
+                    trunk = bytesio.read(bytesio.DEFAULT_CHUNK_SIZE)
+                    while trunk:
+                        f.write(trunk)
+                        trunk = bytesio.read(bytesio.DEFAULT_CHUNK_SIZE)
+                config['executable_file'] = file
+                config['executable_args'] = args
             else:
                 config[field] = value
         return cleaned_data

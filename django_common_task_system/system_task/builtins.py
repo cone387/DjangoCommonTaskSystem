@@ -122,6 +122,14 @@ class BuiltinTasks(BuiltinModels):
                 'required_fields': ['queue']
             }
         )
+        self.custom_program_parent_task = self.model(
+            name='自定义可执行任务',
+            user=user,
+            category=categories.system_base_category,
+            config={
+                'required_fields': ['executable_file']
+            }
+        )
 
         interval = 1
         unit = 'month'
@@ -238,6 +246,35 @@ class BuiltinTasks(BuiltinModels):
                 'related': get_model_related(task_schedule, excludes=[UserModel, CommonCategory]),
             }
         )
+        import os
+        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/executable'))
+        self.test_custom_python_program = self.model(
+            name='测试自定义Python程序执行任务',
+            parent=self.custom_program_parent_task,
+            category=categories.system_test_category,
+            user=user,
+            config={
+                'executable_file': os.path.join(executable_path, 'python_test.py')
+            }
+        )
+        self.test_custom_shell_program = self.model(
+            name='测试自定义Shell程序执行任务',
+            parent=self.custom_program_parent_task,
+            category=categories.system_test_category,
+            user=user,
+            config={
+                'executable_file': os.path.join(executable_path, 'shell_test.sh')
+            }
+        )
+        self.test_execute_zip_program = self.model(
+            name='测试自定义zip程序执行任务',
+            parent=self.custom_program_parent_task,
+            category=categories.system_test_category,
+            user=user,
+            config={
+                'executable_file': os.path.join(executable_path, 'zip_test.zip')
+            }
+        )
         super(BuiltinTasks, self).__init__()
 
 
@@ -327,6 +364,24 @@ class BuiltinSchedules(BuiltinModels):
         )
         self.test_shell_execution = self.model(
             task=tasks.test_shell_execution,
+            user=user,
+            status=TaskScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_custom_python_program = self.model(
+            task=tasks.test_custom_python_program,
+            user=user,
+            status=TaskScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_custom_shell_program = self.model(
+            task=tasks.test_custom_shell_program,
+            user=user,
+            status=TaskScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_execute_zip_program = self.model(
+            task=tasks.test_execute_zip_program,
             user=user,
             status=TaskScheduleStatus.TEST.value,
             config=config

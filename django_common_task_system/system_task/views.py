@@ -7,8 +7,8 @@ from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
 from django_common_task_system.models import system_initialize_signal
-from .models import SystemScheduleQueue, SystemSchedule, \
-    SystemProcess, SystemScheduleProducer, SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport
+from .models import (SystemScheduleQueue, SystemSchedule, SystemProcess, SystemScheduleProducer,
+                     SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport, SystemTask)
 from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread, ExceptionReportView
 from .builtins import builtins
 from .serializers import QueueScheduleSerializer, ExceptionSerializer
@@ -59,6 +59,17 @@ def add_consumer_permission(sender, instance: SystemConsumerPermission, created,
 @receiver(post_delete, sender=SystemConsumerPermission)
 def delete_consumer_permission(sender, instance: SystemConsumerPermission, **kwargs):
     builtins.consumer_permissions.delete(instance)
+
+
+@receiver(post_delete, sender=SystemTask)
+def delete_task(sender, instance: SystemTask, **kwargs):
+    if instance.config:
+        f = instance.config.get('executable_file')
+        if f and os.path.exists(f):
+            os.remove(f)
+            path = os.path.abspath(os.path.join(f, '../'))
+            if not len(os.listdir(path)):
+                os.rmdir(path)
 
 
 class ScheduleProduceView(APIView):

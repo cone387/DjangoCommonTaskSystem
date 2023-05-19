@@ -14,6 +14,56 @@ TaskModel = get_task_model()
 ScheduleModel = get_task_schedule_model()
 
 
+class ExecutableFileWidget(forms.MultiWidget):
+    template_name = 'task_schedule/executable_file.html'
+
+    def __init__(self, attrs=None):
+        file = widgets.AdminFileWidget()
+        args = widgets.AdminTextInputWidget(attrs={'style': 'width: 60%; margin-top: 5px; margin-left: 170px;',
+                                                   'placeholder': '参数, 例如: -a 1 -b 2'})
+        super().__init__([file, args], attrs=attrs)
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        return context
+
+    def format_value(self, value):
+        if value:
+            return value
+        return [None, None]
+
+    def decompress(self, value):
+        if value:
+            return value
+        return [None, None]
+
+
+class ExecutableFileField(forms.MultiValueField):
+    widget = ExecutableFileWidget
+
+    def __init__(self, required=False, label="可执行文件", initial=None, **kwargs):
+        if initial is None:
+            initial = [None, None]
+        a, b = initial
+        fs = (
+            forms.FileField(help_text='仅支持zip、python、shell格式', initial="dadsad"),
+            forms.CharField(help_text='参数, 例如: -a 1 -b 2', initial=b)
+        )
+        super(ExecutableFileField, self).__init__(fs, required=required, label=label, **kwargs)
+
+    def compress(self, data_list):
+        return data_list
+
+    def validate(self, value):
+        super(ExecutableFileField, self).validate(value)
+        file, args = value
+        if not file:
+            raise forms.ValidationError('文件不能为空')
+        ext = file.name.split('.')[-1]
+        if ext not in ['zip', 'py', 'sh']:
+            raise forms.ValidationError('仅支持zip、python、shell格式')
+
+
 class TaskForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
