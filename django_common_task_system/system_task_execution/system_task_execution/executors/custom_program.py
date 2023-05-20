@@ -91,6 +91,8 @@ class CustomProgramExecutor(BaseExecutor):
     def execute(self):
         file = self.schedule.task.config.get('executable_file')
         args = self.schedule.task.config.get('executable_args')
+        if not os.path.exists(file):
+            raise NoRetryException('File(%s) not found' % file)
         # prepare program working path
         working_path = os.path.join(TMP_DIR, str(self.schedule.task.id))
         if not os.path.exists(working_path):

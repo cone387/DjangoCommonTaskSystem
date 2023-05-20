@@ -1,4 +1,4 @@
-recursive-include django_common_task_system/static *.js *.css *.png *.gif *.jpg *.svg *.eot *.ttf *.woff *.woff2
+recursive-include django_common_task_system/static *
 recursive-include django_common_task_system/templates *.html
 global-exclude __pycache__
 global-exclude *.py[co]
