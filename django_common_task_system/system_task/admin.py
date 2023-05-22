@@ -48,7 +48,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         'category',
         ("name", "status",),
         ("parent", 'queue', 'include_meta'),
-        ('executable_file',),
+        ('custom_program', ),
         "script",
         "config",
         'description',

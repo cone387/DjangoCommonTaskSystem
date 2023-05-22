@@ -123,7 +123,7 @@ class BuiltinTasks(BuiltinModels):
             }
         )
         self.custom_program_parent_task = self.model(
-            name='自定义可执行任务',
+            name='自定义程序',
             user=user,
             category=categories.system_base_category,
             config={
@@ -254,7 +254,9 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_test_category,
             user=user,
             config={
-                'executable_file': os.path.join(executable_path, 'python_test.py')
+                'program': {
+                    'executable': os.path.join(executable_path, 'python_test.py')
+                }
             }
         )
         self.test_custom_shell_program = self.model(
@@ -263,7 +265,9 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_test_category,
             user=user,
             config={
-                'executable_file': os.path.join(executable_path, 'shell_test.sh')
+                'program': {
+                    'executable': os.path.join(executable_path, 'shell_test.sh')
+                }
             }
         )
         self.test_execute_zip_program = self.model(
@@ -272,7 +276,9 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_test_category,
             user=user,
             config={
-                'executable_file': os.path.join(executable_path, 'zip_test.zip')
+                'program': {
+                    'executable': os.path.join(executable_path, 'zip_test.zip')
+                }
             }
         )
         super(BuiltinTasks, self).__init__()

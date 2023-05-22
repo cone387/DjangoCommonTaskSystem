@@ -1,0 +1,11 @@
+
+<div class="custom-program">
+    <div>
+        {% with widget=widget.subwidgets.0 %}{% include widget.template_name %}{% endwith %}<br>
+    </div>
+    <p class="file-upload">
+        <span>执行参数：</span>{% with widget=widget.subwidgets.1 %}{% include widget.template_name %}{% endwith %}<br>
+        <span>Docker镜像：</span>{% with widget=widget.subwidgets.2 %}{% include widget.template_name %}{% endwith %}
+        <span>在Docker中运行：</span>{% with widget=widget.subwidgets.3 %}{% include widget.template_name %}{% endwith %}
+    </p>
+</div>

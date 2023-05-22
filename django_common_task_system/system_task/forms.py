@@ -8,7 +8,7 @@ from ..system_task_execution.main import start_system_client
 from django_common_objects.widgets import JSONWidget
 from django.conf import settings
 from django_common_task_system.forms import (
-    TaskScheduleProducerForm, TaskScheduleQueueForm, ExecutableFileField
+    TaskScheduleProducerForm, TaskScheduleQueueForm, CustomProgramField
 )
 
 
@@ -51,7 +51,7 @@ class SystemTaskForm(forms.ModelForm):
         required=False
     )
     # 不知道为什么这里使用validators时，在admin新增任务时如果validator没通过，第一次会报错，第二次就不会报错了
-    executable_file = ExecutableFileField(required=False, help_text='仅支持zip、python、shell格式')
+    custom_program = CustomProgramField(required=False, help_text='仅支持zip、python、shell格式')
 
     executable_path = os.path.join(settings.STATIC_ROOT or os.path.join(os.getcwd(), 'static'), 'executable')
 
@@ -63,11 +63,14 @@ class SystemTaskForm(forms.ModelForm):
                 self.initial['queue'] = models.SystemScheduleQueue.objects.get(code=queue)
             self.initial['script'] = self.instance.config.get('script')
             self.initial['include_meta'] = self.instance.config.get('include_meta')
-            executable_file = self.instance.config.get('executable_file')
-            if executable_file:
-                self.initial['executable_file'] = [
-                    InitialFileStr(executable_file.replace(self.executable_path, '')),
-                    self.instance.config.get('executable_args')
+            program = self.instance.config.get('program')
+            if program:
+                executable = InitialFileStr(program.get('executable', '').replace(self.executable_path, ''))
+                self.initial['custom_program'] = [
+                    executable,
+                    program.get('args'),
+                    program.get('docker_image'),
+                    program.get('run_in_docker', False),
                 ]
 
     def clean(self):
@@ -86,12 +89,12 @@ class SystemTaskForm(forms.ModelForm):
                 break
             if field == 'queue':
                 config[field] = value.code
-            elif field == 'executable_file':
+            elif field == 'custom_program':
                 if isinstance(value, str):
                     config[field] = value
                     continue
                 max_size = parent.config.get('max_size', 5 * 1024 * 1024)
-                bytesio, args = value
+                bytesio, args, docker_image, run_in_docker = value
                 if bytesio.size > max_size:
                     self.add_error('name', '文件大小不能超过%sM' % round(max_size / 1024 / 1024))
                     break
@@ -104,8 +107,10 @@ class SystemTaskForm(forms.ModelForm):
                     while trunk:
                         f.write(trunk)
                         trunk = bytesio.read(bytesio.DEFAULT_CHUNK_SIZE)
-                config['executable_file'] = file
-                config['executable_args'] = args
+                config['executable'] = file
+                config['args'] = args
+                config['docker_image'] = docker_image
+                config['run_in_docker'] = run_in_docker
             else:
                 config[field] = value
         return cleaned_data
