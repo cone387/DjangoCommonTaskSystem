@@ -16,6 +16,6 @@ setup(
     author='cone387',
     maintainer_email='1183008540@qq.com',
     license='MIT',
-    url='https://github.com/cone387/CommonTaskSystemServer',
+    url='https://github.com/cone387/DjangoCommonTaskSystem.git',
     python_requires='>=3.7, <4',
 )
