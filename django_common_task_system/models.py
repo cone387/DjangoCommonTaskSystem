@@ -9,7 +9,6 @@ from django_common_objects import fields as common_fields
 from .utils.cron_utils import get_next_cron_time
 from .utils import foreign_key
 from datetime import datetime, timedelta
-from . import fields
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
 from . import settings
@@ -436,7 +435,7 @@ class AbstractTaskSchedule(models.Model):
     next_schedule_time = models.DateTimeField(default=timezone.now, verbose_name='下次运行时间', db_index=True)
     schedule_start_time = models.DateTimeField(default=datetime.min, verbose_name='开始时间')
     schedule_end_time = models.DateTimeField(default=datetime.max, verbose_name='结束时间')
-    config = fields.ScheduleConfigField(default=dict, verbose_name='参数')
+    config = common_fields.ConfigField(default=dict, verbose_name='参数')
     status = common_fields.CharField(default=TaskScheduleStatus.OPENING.value, verbose_name='状态',
                                      choices=TaskScheduleStatus.choices)
     strict_mode = models.BooleanField(default=False, verbose_name='严格模式')

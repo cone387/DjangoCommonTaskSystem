@@ -8,7 +8,7 @@ from ..system_task_execution.main import start_system_client
 from django_common_objects.widgets import JSONWidget
 from django.conf import settings
 from django_common_task_system.forms import (
-    TaskScheduleProducerForm, TaskScheduleQueueForm, CustomProgramField
+    TaskScheduleProducerForm, TaskScheduleQueueForm, CustomProgramField, SqlConfigField
 )
 
 
@@ -50,6 +50,7 @@ class SystemTaskForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
         required=False
     )
+    sql_config = SqlConfigField(required=False, label="SQL源", help_text="仅支持MySQL, 默认当前数据库")
     # 不知道为什么这里使用validators时，在admin新增任务时如果validator没通过，第一次会报错，第二次就不会报错了
     custom_program = CustomProgramField(required=False, help_text='仅支持zip、python、shell格式')
 
@@ -72,6 +73,15 @@ class SystemTaskForm(forms.ModelForm):
                     custom_program.get('docker_image'),
                     custom_program.get('run_in_docker', False),
                 ]
+            sql_config = config.get('sql_config')
+            if sql_config:
+                self.initial['sql_config'] = [
+                    sql_config.get('host'),
+                    sql_config.get('port'),
+                    sql_config.get('database'),
+                    sql_config.get('user'),
+                    sql_config.get('password'),
+                ]
 
     def clean(self):
         cleaned_data = super(SystemTaskForm, self).clean()
@@ -89,6 +99,16 @@ class SystemTaskForm(forms.ModelForm):
                 break
             if field == 'queue':
                 config[field] = value.code
+            elif field == 'sql_config':
+                host, port, database, user, password = value
+                if host:
+                    config[field] = {
+                        'host': host,
+                        'port': port,
+                        'database': database,
+                        'user': user,
+                        'password': password,
+                    }
             elif field == 'custom_program':
                 bytesio, args, docker_image, run_in_docker = value
                 if not bytesio:

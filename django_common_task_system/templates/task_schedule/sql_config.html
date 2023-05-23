@@ -1,0 +1,12 @@
+
+<div class="sql-config">
+    <div>
+        <span>主机：</span>{% with widget=widget.subwidgets.0 %}{% include widget.template_name %}{% endwith %}
+        <span>端口：</span>{% with widget=widget.subwidgets.1 %}{% include widget.template_name %}{% endwith %}
+        <span>数据库：</span>{% with widget=widget.subwidgets.2 %}{% include widget.template_name %}{% endwith %}
+    </div>
+    <div style="margin-top: 1px">
+        <span>用户：</span>{% with widget=widget.subwidgets.3 %}{% include widget.template_name %}{% endwith %}
+        <span>密码：</span>{% with widget=widget.subwidgets.4 %}{% include widget.template_name %}{% endwith %}
+    </div>
+</div>

@@ -7,7 +7,6 @@ import django.db.models.deletion
 import django.utils.timezone
 import django_common_objects.fields
 import django_common_objects.models
-import django_common_task_system.fields
 import django_common_task_system.system_task.models
 
 
@@ -47,7 +46,7 @@ class Migration(migrations.Migration):
                 ('next_schedule_time', models.DateTimeField(db_index=True, default=django.utils.timezone.now, verbose_name='下次运行时间')),
                 ('schedule_start_time', models.DateTimeField(default=datetime.datetime(1, 1, 1, 0, 0), verbose_name='开始时间')),
                 ('schedule_end_time', models.DateTimeField(default=datetime.datetime(9999, 12, 31, 23, 59, 59, 999999), verbose_name='结束时间')),
-                ('config', django_common_task_system.fields.ScheduleConfigField(default=dict, verbose_name='参数')),
+                ('config', django_common_objects.fields.ConfigField(default=dict, verbose_name='参数')),
                 ('status', django_common_objects.fields.CharField(choices=[('O', '开启'), ('C', '关闭'), ('D', '已完成'), ('T', '测试'), ('E', '调度错误')], default='O', max_length=1, verbose_name='状态')),
                 ('create_time', models.DateTimeField(default=django.utils.timezone.now, verbose_name='创建时间')),
                 ('update_time', models.DateTimeField(auto_now=True, verbose_name='更新时间')),

@@ -49,6 +49,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         ("name", "status",),
         ("parent", 'queue', 'include_meta'),
         ('custom_program', ),
+        'sql_config',
         "script",
         "config",
         'description',

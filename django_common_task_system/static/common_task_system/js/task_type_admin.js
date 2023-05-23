@@ -6,6 +6,7 @@ $(document).ready(function () {
   const $config = $('.form-row.field-config');
   const $taskScriptInput = $('#id_script');
   const $customProgram = $('.form-row.field-custom_program');
+  const $sqlConfig = $('.form-row.field-sql_config');
 
   function show_hide_fields(){
     const parentTask = $taskParent.find("option:selected").text();
@@ -13,14 +14,17 @@ $(document).ready(function () {
     $config.hide();
     $taskScriptField.show();
     $customProgram.hide();
+    $sqlConfig.hide();
     if(parentTask === "SQL执行") {
       $taskScriptInput.attr('placeholder', "请输入SQL语句, 多个语句用;分隔");
       $produceQueue.hide();
       $includeMeta.hide();
+      $sqlConfig.show();
     }else if(parentTask === "SQL生产"){
       $taskScriptInput.attr('placeholder', "请输入单条select语句");
       $produceQueue.show();
       $includeMeta.show();
+      $sqlConfig.show();
     }else if (parentTask === "Shell执行") {
         $produceQueue.hide();
         $taskScriptInput.attr('placeholder', "请输入shell命令，多个命令用;分隔");

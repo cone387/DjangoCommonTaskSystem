@@ -3,9 +3,9 @@ from setuptools import setup, find_packages
 setup(
     name='django-common-task-system',
     packages=find_packages(exclude=['local_tests']),
-    version='1.3.1',
+    version='1.3.2',
     install_requires=[
-        "django-common-objects>=1.0.6",
+        "django-common-objects>=1.0.7",
         "django>=3.2.18",
         "croniter>=1.3.8",
         "djangorestframework>=3.14.0",

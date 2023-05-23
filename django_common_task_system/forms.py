@@ -59,6 +59,53 @@ class CustomProgramField(forms.MultiValueField):
                 raise forms.ValidationError('仅支持zip、python、shell格式')
 
 
+class SqlConfigWidget(forms.MultiWidget):
+    template_name = 'task_schedule/sql_config.html'
+
+    def __init__(self, attrs=None):
+        host = widgets.AdminTextInputWidget()
+        port = widgets.AdminIntegerFieldWidget()
+        db = widgets.AdminTextInputWidget(attrs={'style': 'width: 120px'})
+        user = widgets.AdminTextInputWidget()
+        pwd = widgets.AdminTextInputWidget(attrs={'type': 'password'})
+        super().__init__([host, port, db, user, pwd], attrs=attrs)
+
+    def decompress(self, value):
+        if value:
+            return value
+        return [None, 3306, None, 'root', None]
+
+
+class SqlConfigField(forms.MultiValueField):
+    widget = SqlConfigWidget
+
+    def __init__(self, required=False, label="SQL配置", initial=None, **kwargs):
+        if initial is None:
+            initial = [None, 3306, None, 'root', None]
+        a, b, c, d, e = initial
+        fs = (
+            forms.CharField(help_text='仅支持zip、python、shell格式', required=False, initial=a),
+            forms.IntegerField(help_text='端口', required=False, initial=b),
+            forms.CharField(help_text='DB', required=False, initial=c),
+            forms.CharField(help_text='用户名', required=False, initial=d),
+            forms.CharField(help_text='在Docker中运行', initial=e),
+        )
+        super(SqlConfigField, self).__init__(fs, required=required, label=label, **kwargs)
+
+    def compress(self, data_list):
+        return data_list
+
+    def validate(self, value):
+        super(SqlConfigField, self).validate(value)
+        host, port, db, user, pwd = value
+        if host:
+            import pymysql
+            try:
+                pymysql.connect(host=host, port=port, db=db, user=user, password=pwd)
+            except Exception as e:
+                raise forms.ValidationError('连接失败: {}'.format(e))
+
+
 class TaskForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
