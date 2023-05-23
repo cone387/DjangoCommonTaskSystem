@@ -20,9 +20,9 @@ class CustomProgramWidget(forms.MultiWidget):
     def __init__(self, attrs=None):
         file = widgets.AdminFileWidget()
         args = widgets.AdminTextInputWidget(attrs={'style': 'width: 60%; margin-top: 1px; ',
-                                                   'placeholder': '参数, 例如: -a 1 -b 2'})
+                                                   'placeholder': '例如: -a 1 -b 2'})
         docker_image = widgets.AdminTextInputWidget(attrs={'style': 'margin-top: 1px; ',
-                                                           'placeholder': '镜像'})
+                                                           'placeholder': 'common-task-system-client:latest'})
         run_in_docker = forms.CheckboxInput()
         super().__init__([file, args, docker_image, run_in_docker], attrs=attrs)
 
@@ -53,11 +53,10 @@ class CustomProgramField(forms.MultiValueField):
     def validate(self, value):
         super(CustomProgramField, self).validate(value)
         file, args, *_ = value
-        if not file:
-            raise forms.ValidationError('文件不能为空')
-        ext = file.name.split('.')[-1]
-        if ext not in ['zip', 'py', 'sh']:
-            raise forms.ValidationError('仅支持zip、python、shell格式')
+        if file:
+            ext = file.name.split('.')[-1]
+            if ext not in ['zip', 'py', 'sh']:
+                raise forms.ValidationError('仅支持zip、python、shell格式')
 
 
 class TaskForm(forms.ModelForm):

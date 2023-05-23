@@ -58,19 +58,19 @@ class SystemTaskForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super(SystemTaskForm, self).__init__(*args, **kwargs)
         if self.instance.id:
-            queue = self.instance.config.get('queue')
+            config = self.instance.config
+            queue = config.get('queue')
             if queue:
                 self.initial['queue'] = models.SystemScheduleQueue.objects.get(code=queue)
-            self.initial['script'] = self.instance.config.get('script')
-            self.initial['include_meta'] = self.instance.config.get('include_meta')
-            program = self.instance.config.get('program')
-            if program:
-                executable = InitialFileStr(program.get('executable', '').replace(self.executable_path, ''))
+            self.initial['script'] = config.get('script')
+            self.initial['include_meta'] = config.get('include_meta')
+            custom_program = config.get('custom_program')
+            if custom_program:
                 self.initial['custom_program'] = [
-                    executable,
-                    program.get('args'),
-                    program.get('docker_image'),
-                    program.get('run_in_docker', False),
+                    InitialFileStr(custom_program.get('executable', '').replace(self.executable_path, '')),
+                    custom_program.get('args'),
+                    custom_program.get('docker_image'),
+                    custom_program.get('run_in_docker', False),
                 ]
 
     def clean(self):
@@ -90,13 +90,23 @@ class SystemTaskForm(forms.ModelForm):
             if field == 'queue':
                 config[field] = value.code
             elif field == 'custom_program':
-                if isinstance(value, str):
-                    config[field] = value
-                    continue
+                bytesio, args, docker_image, run_in_docker = value
+                if not bytesio:
+                    custom_program = config.pop(field, None)
+                    if not custom_program or not custom_program.get('executable'):
+                        self.add_error('custom_program', '自定义程序不能为空')
+                    else:
+                        config[field] = {
+                            'executable': custom_program.get('executable'),
+                            'args': args,
+                            'docker_image': docker_image,
+                            'run_in_docker': run_in_docker,
+                        }
+                    break
                 max_size = parent.config.get('max_size', 5 * 1024 * 1024)
                 bytesio, args, docker_image, run_in_docker = value
                 if bytesio.size > max_size:
-                    self.add_error('name', '文件大小不能超过%sM' % round(max_size / 1024 / 1024))
+                    self.add_error('custom_program', '文件大小不能超过%sM' % round(max_size / 1024 / 1024))
                     break
                 path = os.path.join(self.executable_path, get_md5(cleaned_data['name']))
                 if not os.path.exists(path):
@@ -107,10 +117,12 @@ class SystemTaskForm(forms.ModelForm):
                     while trunk:
                         f.write(trunk)
                         trunk = bytesio.read(bytesio.DEFAULT_CHUNK_SIZE)
-                config['executable'] = file
-                config['args'] = args
-                config['docker_image'] = docker_image
-                config['run_in_docker'] = run_in_docker
+                config[field] = {
+                    'executable': file,
+                    'args': args,
+                    'docker_image': docker_image,
+                    'run_in_docker': run_in_docker,
+                }
             else:
                 config[field] = value
         return cleaned_data

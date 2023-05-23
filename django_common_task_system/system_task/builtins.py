@@ -127,7 +127,7 @@ class BuiltinTasks(BuiltinModels):
             user=user,
             category=categories.system_base_category,
             config={
-                'required_fields': ['executable_file']
+                'required_fields': ['custom_program']
             }
         )
 
@@ -247,14 +247,14 @@ class BuiltinTasks(BuiltinModels):
             }
         )
         import os
-        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/executable'))
+        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/custom_programs'))
         self.test_custom_python_program = self.model(
             name='测试自定义Python程序执行任务',
             parent=self.custom_program_parent_task,
             category=categories.system_test_category,
             user=user,
             config={
-                'program': {
+                'custom_program': {
                     'executable': os.path.join(executable_path, 'python_test.py')
                 }
             }
@@ -265,7 +265,7 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_test_category,
             user=user,
             config={
-                'program': {
+                'custom_program': {
                     'executable': os.path.join(executable_path, 'shell_test.sh')
                 }
             }
@@ -276,7 +276,7 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_test_category,
             user=user,
             config={
-                'program': {
+                'custom_program': {
                     'executable': os.path.join(executable_path, 'zip_test.zip')
                 }
             }
