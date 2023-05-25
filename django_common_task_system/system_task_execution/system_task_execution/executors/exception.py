@@ -50,7 +50,7 @@ class SystemExceptionExecutor(BaseExecutor):
         ''' % (self.schedule_log_model._meta.db_table, max_retry_times, last_schedule_time, max_fetch_num,)
         with connection.cursor() as cursor:
             cursor.execute(command)
-            log_ids = [x[4] for x in cursor.fetchall()]
+            log_ids = [str(x[4]) for x in cursor.fetchall()]
         batch_num = 1000
         i = 0
         batch = log_ids[:batch_num]
@@ -77,4 +77,4 @@ class ScheduleExceptionExecutor(SystemExceptionExecutor):
     schedule_model = TaskSchedule
     schedule_id = builtins.schedules.task_exception_handling.id
     schedule_log_model = TaskScheduleLog
-    handle_url = 'task_schedule_put'
+    handle_url = 'task_schedule_retry'

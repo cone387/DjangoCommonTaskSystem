@@ -178,8 +178,9 @@ class TaskScheduleQueueAPI(object):
             return Response({'error': 'schedule not found'}, status=status.HTTP_404_NOT_FOUND)
 
     @classmethod
+    @csrf_exempt
     def retry(cls, request):
-        log_ids = request.GET.get('log-ids', None) or request.data.get('log-ids', None)
+        log_ids = request.GET.get('log-ids', None) or request.POST.get('log-ids', None)
         if not log_ids:
             return JsonResponse({'error': 'log-ids不能为空'}, status=status.HTTP_400_BAD_REQUEST)
         try:
