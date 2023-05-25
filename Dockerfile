@@ -19,8 +19,8 @@ RUN python get-pip.py
 RUN pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
 RUN pip install asgiref>=3.6.0
 RUN pip install croniter>=1.3.8
-RUN pip install Django>=4.1.7
-RUN pip install django-common-objects
+RUN pip install Django==4.1.7
+RUN pip install django-common-objects>=1.0.7
 RUN pip install djangorestframework>=3.14.0
 RUN pip install jionlp-time>=1.0.0
 RUN pip install python-dateutil>=2.8.2

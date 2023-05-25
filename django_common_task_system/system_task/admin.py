@@ -81,7 +81,7 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
     schedule_log_model = models.SystemScheduleLog
     queues = builtins.queues
     schedule_put_name = 'system_schedule_put'
-    list_filter = ('task__category', )
+    list_filter = ('task__category', 'status')
 
     def has_delete_permission(self, request, obj=None):
         if obj and not request.user.is_superuser:

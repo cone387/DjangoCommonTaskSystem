@@ -27,6 +27,7 @@ def request_system_schedule(url):
         schedule = to_model(result, SystemSchedule)
         schedule.queue = result.pop('queue', None)
         schedule.generator = result.pop('generator', None)
+        schedule.last_log = result.pop('last_log', None)
         return schedule
 
 

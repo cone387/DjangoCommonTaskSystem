@@ -1,7 +1,6 @@
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from rest_framework import status
-from rest_framework.decorators import api_view
 from rest_framework.generics import CreateAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -12,13 +11,14 @@ from django.conf import settings
 from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
 from .choices import TaskScheduleStatus
 from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
-    ConsumerPermission, ExceptionReport, builtins, ScheduleConfig
+    ConsumerPermission, ExceptionReport, builtins, ScheduleConfig, UserModel, CommonCategory
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from django.views.decorators.csrf import csrf_exempt
 from queue import Empty
 from datetime import datetime
 from jionlp_time import parse_time
 from .utils.schedule_time import nlp_config_to_schedule_config
+from .utils.foreign_key import get_model_related
 from .models import system_initialize_signal, system_schedule_event
 from threading import Thread
 import time
@@ -59,8 +59,8 @@ class TaskScheduleThread(Thread):
                 try:
                     # 限制队列长度, 防止内存溢出
                     while queue.qsize() < max_queue_size and schedule.next_schedule_time <= now:
+                        schedule.queue = queue_instance.code
                         data = self.serializer(schedule).data
-                        data['queue'] = queue_instance.code
                         queue.put(data)
                         schedule.next_schedule_time = ScheduleConfig(config=schedule.config
                                                                      ).get_next_time(schedule.next_schedule_time)
@@ -179,23 +179,27 @@ class TaskScheduleQueueAPI(object):
 
     @classmethod
     def retry(cls, request):
-        log_ids = request.GET.get('log-ids', None)
+        log_ids = request.GET.get('log-ids', None) or request.data.get('log-ids', None)
         if not log_ids:
             return JsonResponse({'error': 'log-ids不能为空'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             log_ids = [int(i) for i in log_ids.split(',')]
-            assert len(log_ids) < 1000, 'log-ids不能超过1000个'
+            if len(log_ids) > 1000:
+                raise Exception('log-ids不能超过1000个')
         except Exception as e:
             return JsonResponse({'error': 'logs_ids参数错误: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         try:
             result = {x: 'no such log' for x in log_ids}
-            logs = cls.log_model.objects.filter(id__in=log_ids)
+            related = get_model_related(cls.log_model, excludes=[UserModel, CommonCategory])
+            logs = cls.log_model.objects.filter(id__in=log_ids).select_related(*related)
             for log in logs:
+                schedule = log.schedule
                 queue = cls.queues[log.queue].queue
-                log.schedule.next_schedule_time = log.schedule_time
-                log.schedule.generator = 'retry'
-                data = cls.serializer(log.schedule).data
-                data['queue'] = log.queue
+                schedule.next_schedule_time = log.schedule_time
+                schedule.generator = 'retry'
+                schedule.last_log = log.result
+                schedule.queue = log.queue
+                data = cls.serializer(schedule).data
                 queue.put(data)
                 result[log.id] = log.queue
             return JsonResponse(result)
@@ -245,8 +249,8 @@ class TaskScheduleQueueAPI(object):
                 schedule_result = queue_result.setdefault(i, [])
                 schedule.next_schedule_time = t
                 schedule.generator = 'put'
+                schedule.queue = q
                 data = cls.serializer(schedule).data
-                data['queue'] = q
                 queue_instance.queue.put(data)
                 schedule_result.append(t.strftime('%Y-%m-%d %H:%M:%S'))
             return JsonResponse(result)

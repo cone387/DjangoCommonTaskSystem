@@ -8,6 +8,7 @@ from django_common_objects.models import CommonCategory
 from django_common_task_system.system_task.models import SystemTask, SystemScheduleProducer, SystemSchedule, \
     SystemConsumerPermission, SystemScheduleLog, SystemScheduleQueue
 from django_common_task_system import get_schedule_log_model, get_task_schedule_model
+from django_common_task_system.utils.foreign_key import get_model_related
 
 
 class BuiltinCategories(BuiltinModels):
@@ -206,21 +207,6 @@ class BuiltinTasks(BuiltinModels):
             },
             user=user
         )
-
-        def get_model_related(model, parent='', excludes=None):
-            related = []
-            for field in model._meta.fields:
-                t = field.__class__.__name__
-                if t == 'ForeignKey' and parent.split("__")[-1] != field.name:
-                    if excludes and field.related_model in excludes:
-                        continue
-                    if parent:
-                        child = parent + "__" + field.name
-                    else:
-                        child = field.name
-                    related.append(child)
-                    related.extend(get_model_related(field.related_model, parent=child, excludes=excludes))
-            return related
 
         self.system_strict_schedule_process = self.model(
             name='系统严格模式任务处理',

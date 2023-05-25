@@ -53,10 +53,20 @@ class QueueScheduleSerializer(TaskScheduleSerializer):
     callback = TaskCallbackSerializer()
     schedule_time = serializers.DateTimeField(source="next_schedule_time")
     generator = serializers.SerializerMethodField()
+    last_log = serializers.SerializerMethodField()
+    queue = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_last_log(obj):
+        return getattr(obj, 'last_log', None)
 
     @staticmethod
     def get_generator(obj):
         return getattr(obj, 'generator', 'auto')
+
+    @staticmethod
+    def get_queue(obj):
+        return getattr(obj, 'queue')
 
     class Meta:
         model = ScheduleModel

@@ -14,3 +14,19 @@ def get_related_object_ids(obj: Model):
 
 def get_unrelated_object_ids(obj: Model):
     pass
+
+
+def get_model_related(model, parent='', excludes=None, related=None):
+    related = related or []
+    for field in model._meta.fields:
+        t = field.__class__.__name__
+        if t == 'ForeignKey' and parent.split("__")[-1] != field.name:
+            if excludes and field.related_model in excludes:
+                continue
+            if parent:
+                child = parent + "__" + field.name
+            else:
+                child = field.name
+            related.append(child)
+            get_model_related(field.related_model, parent=child, excludes=excludes, related=related)
+    return related

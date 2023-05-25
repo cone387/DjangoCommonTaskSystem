@@ -1,6 +1,6 @@
 from django.urls import reverse
 import requests
-from .base import BaseExecutor, EmptyResult
+from .base import BaseExecutor, EmptyResult, NoRetryException
 from django.db import connection
 from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
 from django_common_task_system.system_task.builtins import builtins
@@ -31,7 +31,7 @@ class SystemExceptionExecutor(BaseExecutor):
     schedule_id = builtins.schedules.system_exception_handling.id
     schedule_model = SystemSchedule
     schedule_log_model = SystemScheduleLog
-    handle_url = 'system_schedule_put'
+    handle_url = 'system_schedule_retry'
 
     def execute(self):
         max_retry_times = self.schedule.task.config.get('max_retry_times', 5)
@@ -41,42 +41,32 @@ class SystemExceptionExecutor(BaseExecutor):
             self.schedule.next_schedule_time)
         last_schedule_time = self.schedule.next_schedule_time - (next_schedule_time - self.schedule.next_schedule_time)
         command = '''
-            select * from (
-            select queue, schedule_id, schedule_time, count(*) as times, max(create_time) as lastest_time 
-            from %s where create_time > CURDATE() and status = 'F' 
-            GROUP BY queue, schedule_id, schedule_time order by queue, schedule_id, schedule_time
-            ) a where a.times < %s and a.lastest_time > '%s' limit %s
+            select queue, schedule_id, schedule_time, count(*) as times, 
+                max(id) as log_id, max(create_time) as lastest_time 
+            from %s where create_time > CURDATE() and status in ('F', 'T') 
+            GROUP BY queue, schedule_id, schedule_time 
+            having times < %s and lastest_time > '%s' 
+            order by queue, schedule_id, schedule_time limit %s
         ''' % (self.schedule_log_model._meta.db_table, max_retry_times, last_schedule_time, max_fetch_num,)
         with connection.cursor() as cursor:
             cursor.execute(command)
-            rows = list(cursor.fetchall())
+            log_ids = [x[4] for x in cursor.fetchall()]
         batch_num = 1000
         i = 0
-        batch = rows[:batch_num]
+        batch = log_ids[:batch_num]
         result = {}
         error = None
         while batch:
             path = reverse(self.handle_url)
-            ids, queues, times = [], [], []
-            for q, i, t, *_ in batch:
-                if i == self.schedule_id:
-                    continue
-                ids.append(str(i))
-                queues.append(q)
-                times.append(t.strftime('%Y-%m-%d %H:%M:%S'))
             url = settings.HOST + path
-            batch_result = requests.post(url, data={
-                'i': ','.join(ids),
-                'q': ','.join(queues),
-                't': ','.join(times)
-            }).json()
+            batch_result = requests.post(url, data={'log-ids': ','.join(batch)}).json()
             result[i] = batch_result
             if 'error' in batch_result:
                 error = batch_result['error']
             i += 1
-            batch = rows[i * batch_num: (i + 1) * batch_num]
+            batch = log_ids[i * batch_num: (i + 1) * batch_num]
         if error:
-            raise Exception(error)
+            raise NoRetryException(error)
         if not result:
             raise EmptyResult('no task need to handle')
         return result
