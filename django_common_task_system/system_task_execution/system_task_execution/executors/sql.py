@@ -30,8 +30,9 @@ class SqlExecutor(BaseExecutor):
                             'script': sql,
                             'result': cursor.fetchall()
                         }
-                    elif sql.lower().startswith('insert') or sql.lower().startswith('replace'):
-                        raise NoRetryException('insert or replace not support')
+                    elif sql.lower().startswith('replace'):
+                        # 需要允许执行select语句，比如会有insert into select语句的场景
+                        raise NoRetryException('replace not support')
                     else:
                         cmd_result = {
                             'script': sql,

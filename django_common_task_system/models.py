@@ -19,7 +19,7 @@ from django.core.validators import ValidationError
 from django.dispatch import Signal, receiver
 from threading import Event
 from collections import OrderedDict
-from django.db.utils import ProgrammingError
+from django.db.utils import ProgrammingError, OperationalError
 
 system_initialize_signal = Signal()
 system_schedule_event = Event()
@@ -686,7 +686,7 @@ class BaseBuiltinQueues(BuiltinModels):
         try:
             for m in self.model.objects.filter(status=True):
                 self.add(m)
-        except ProgrammingError:
+        except (ProgrammingError, OperationalError):
             pass
 
     def add(self, instance: AbstractTaskScheduleQueue, key=None):
@@ -729,7 +729,7 @@ class BaseBuiltinProducers(BuiltinModels):
         try:
             for m in self.model.objects.filter(status=True):
                 self.add(m)
-        except ProgrammingError:
+        except (ProgrammingError, OperationalError):
             pass
 
     def add(self, instance: AbstractTaskScheduleProducer, key=None):
@@ -779,7 +779,7 @@ class BaseConsumerPermissions(BuiltinModels):
         try:
             for m in self.model.objects.filter(status=True):
                 self.add(m)
-        except ProgrammingError:
+        except (ProgrammingError, OperationalError):
             pass
 
     def add(self, instance: AbstractConsumerPermission, key=None):
