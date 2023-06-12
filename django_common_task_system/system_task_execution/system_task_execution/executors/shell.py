@@ -11,7 +11,7 @@ class ShellExecutor(BaseExecutor):
         if sys.platform == 'win32':
             raise RuntimeError('Windows系统不支持shell命令执行')
 
-        commands = self.schedule.task.config.get('shell', '').split(';')
+        commands = self.schedule.task.config.get('script', '').split(';')
         filename = '/tmp/shell_executor.sh'
         with open(filename, 'w') as f:
             f.write('#!/bin/bash -e \n')
