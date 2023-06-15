@@ -20,6 +20,10 @@ def start_system_client(log_file=None, **kwargs):
     import django
     django.setup()
 
+    from django.conf import settings
+    if 'django_common_task_system.system_task' not in settings.INSTALLED_APPS:
+        print('system task did not install')
+        return
     if log_file:
         from .system_task_execution import settings
         logger = settings.logger

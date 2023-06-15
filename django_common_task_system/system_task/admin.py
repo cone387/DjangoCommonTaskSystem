@@ -8,6 +8,7 @@ from .builtins import builtins
 from . import forms
 from .. import admin as base_admin
 from .process import ProcessManager
+from ..admin import CategoryFilter
 from ..system_task_execution.main import start_system_client
 import os
 
@@ -55,7 +56,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         'description',
     )
     filter_horizontal = []
-    list_filter = ('category', 'parent')
+    list_filter = (CategoryFilter.of_model(model=models.SystemTask), 'tags', 'status', 'parent')
 
     def has_delete_permission(self, request, obj=None):
         if obj and not request.user.is_superuser:

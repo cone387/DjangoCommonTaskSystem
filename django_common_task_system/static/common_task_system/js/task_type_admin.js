@@ -27,6 +27,7 @@ $(document).ready(function () {
       $sqlConfig.show();
     }else if (parentTask === "Shell执行") {
         $produceQueue.hide();
+        $includeMeta.hide();
         $taskScriptInput.attr('placeholder', "请输入shell命令，多个命令用;分隔");
     }else if(parentTask === "自定义程序"){
         $customProgram.show();

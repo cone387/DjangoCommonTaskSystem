@@ -5,12 +5,32 @@ from django.utils.safestring import mark_safe
 from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from datetime import datetime
+from django_common_objects.models import CommonCategory
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
 from . import models, forms, get_task_model, get_schedule_log_model, get_task_schedule_model
+
 
 TaskModel = get_task_model()
 ScheduleModel = get_task_schedule_model()
 TaskScheduleLogModel = get_schedule_log_model()
+
+
+class CategoryFilter(admin.SimpleListFilter):
+    title = '任务分类'
+    parameter_name = 'category'
+
+    def lookups(self, request, model_admin):
+        model = getattr(self, 'model')
+        return CommonCategory.objects.filter(model=model._meta.label).values_list('id', 'name')
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(category_id=self.value())
+        return queryset
+
+    @classmethod
+    def of_model(cls, model):
+        return type('%sCategoryFilter' % model.__name__, (cls,), {'model': model})
 
 
 class TaskAdmin(UserAdmin):
@@ -27,7 +47,7 @@ class TaskAdmin(UserAdmin):
 
     )
     filter_horizontal = ('tags',)
-    list_filter = ('category', 'tags', 'parent')
+    list_filter = (CategoryFilter.of_model(model=TaskModel), 'tags', 'parent')
 
     def __init__(self, *args, **kwargs):
         super(TaskAdmin, self).__init__(*args, **kwargs)
@@ -319,3 +339,6 @@ admin.site.register(models.TaskScheduleProducer, TaskScheduleProducerAdmin)
 admin.site.register(models.ConsumerPermission, ConsumerPermissionAdmin)
 admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 
+
+admin.site.site_header = '任务管理系统'
+admin.site.site_title = '任务管理系统'
