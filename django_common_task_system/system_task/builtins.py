@@ -1,9 +1,9 @@
-from django_common_task_system.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType
-from django_common_task_system.models import (
-    AbstractTaskSchedule, TaskScheduleLog,
+from django_common_task_system.generic.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType
+from django_common_task_system.generic.builtins import (
     BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, BaseBuiltins, UserModel,
     BuiltinModels
 )
+from django_common_task_system.generic import App
 from django_common_objects.models import CommonCategory
 from django_common_task_system.system_task.models import SystemTask, SystemScheduleProducer, SystemSchedule, \
     SystemConsumerPermission, SystemScheduleLog, SystemScheduleQueue
@@ -157,16 +157,20 @@ class BuiltinTasks(BuiltinModels):
 
         interval = 1
         unit = 'month'
-        self.task_log_cleaning = self.model(
-            name='任务日志清理',
-            user=user,
-            category=categories.system_default_category,
-            parent=self.sql_execution_parent_task,
-            config={
-                'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
-                       (TaskScheduleLog._meta.db_table, interval, unit)
-            },
-        )
+
+        if BaseBuiltins.is_app_installed(App.user_task):
+            from django_common_task_system.models import TaskScheduleLog
+
+            self.task_log_cleaning = self.model(
+                name='任务日志清理',
+                user=user,
+                category=categories.system_default_category,
+                parent=self.sql_execution_parent_task,
+                config={
+                    'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
+                           (TaskScheduleLog._meta.db_table, interval, unit)
+                },
+            )
 
         max_retry_times = 5
         self.task_exception_handling = self.model(
@@ -219,19 +223,21 @@ class BuiltinTasks(BuiltinModels):
                 'related': ['task', 'callback'],
             }
         )
-        task_schedule = get_task_schedule_model()
-        log_model = get_schedule_log_model()
-        self.task_strict_schedule_process = self.model(
-            name='普通任务严格模式任务处理',
-            parent=self.strict_schedule_parent_task,
-            category=categories.system_default_category,
-            user=user,
-            config={
-                'schedule_model': task_schedule.__module__ + "." + task_schedule.__name__,
-                'log_model': log_model.__module__ + "." + log_model.__name__,
-                'related': get_model_related(task_schedule, excludes=[UserModel, CommonCategory]),
-            }
-        )
+
+        if BaseBuiltins.is_app_installed(App.user_task):
+            task_schedule = get_task_schedule_model()
+            log_model = get_schedule_log_model()
+            self.task_strict_schedule_process = self.model(
+                name='普通任务严格模式任务处理',
+                parent=self.strict_schedule_parent_task,
+                category=categories.system_default_category,
+                user=user,
+                config={
+                    'schedule_model': task_schedule.__module__ + "." + task_schedule.__name__,
+                    'log_model': log_model.__module__ + "." + log_model.__name__,
+                    'related': get_model_related(task_schedule, excludes=[UserModel, CommonCategory]),
+                }
+            )
         import os
         executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/custom_programs'))
         self.test_custom_python_program = self.model(
@@ -304,21 +310,22 @@ class BuiltinSchedules(BuiltinModels):
             }
         )
 
-        self.task_log_cleaning = self.model(
-            task=tasks.task_log_cleaning,
-            user=user,
-            config={
-                "T": {
-                    "DAY": {
-                        "period": 1
+        if hasattr(tasks, 'task_log_cleaning'):
+            self.task_log_cleaning = self.model(
+                task=tasks.task_log_cleaning,
+                user=user,
+                config={
+                    "T": {
+                        "DAY": {
+                            "period": 1
+                        },
+                        "time": "01:00:00",
+                        "type": "DAY"
                     },
-                    "time": "01:00:00",
-                    "type": "DAY"
-                },
-                "base_on_now": True,
-                "schedule_type": "T"
-            }
-        )
+                    "base_on_now": True,
+                    "schedule_type": "T"
+                }
+            )
 
         self.task_exception_handling = self.model(
             task=tasks.task_exception_handling,
@@ -393,19 +400,20 @@ class BuiltinSchedules(BuiltinModels):
             }
         )
 
-        self.task_strict_schedule_process = self.model(
-            task=tasks.task_strict_schedule_process,
-            user=user,
-            status=TaskScheduleStatus.OPENING.value,
-            config={
-                "S": {
-                    "period": 60 * 60,
-                    "schedule_start_time": "2023-04-04 15:31:00"
-                },
-                "base_on_now": True,
-                "schedule_type": "S"
-            }
-        )
+        if hasattr(tasks, 'task_strict_schedule_process'):
+            self.task_strict_schedule_process = self.model(
+                task=tasks.task_strict_schedule_process,
+                user=user,
+                status=TaskScheduleStatus.OPENING.value,
+                config={
+                    "S": {
+                        "period": 60 * 60,
+                        "schedule_start_time": "2023-04-04 15:31:00"
+                    },
+                    "base_on_now": True,
+                    "schedule_type": "S"
+                }
+            )
         super(BuiltinSchedules, self).__init__()
 
 
@@ -425,7 +433,7 @@ class BuiltinConsumerPermissions(BaseConsumerPermissions):
 
 
 class Builtins(BaseBuiltins):
-    app = 'django_common_task_system.system_task'
+    app = App.system_task
 
     def __init__(self):
         super(Builtins, self).__init__()
@@ -438,3 +446,4 @@ class Builtins(BaseBuiltins):
 
 
 builtins = Builtins()
+builtins.initialize()

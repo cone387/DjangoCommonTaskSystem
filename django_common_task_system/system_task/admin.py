@@ -6,9 +6,8 @@ from django.db.models.signals import post_delete
 from . import models
 from .builtins import builtins
 from . import forms
-from .. import admin as base_admin
+from django_common_task_system.generic import admin as generic_admin
 from .process import ProcessManager
-from ..admin import CategoryFilter
 from ..system_task_execution.main import start_system_client
 import os
 
@@ -40,7 +39,7 @@ def delete_process(sender, instance: models.SystemProcess, **kwargs):
         os.remove(instance.log_file)
 
 
-class SystemTaskAdmin(base_admin.TaskAdmin):
+class SystemTaskAdmin(generic_admin.TaskAdmin):
     form = forms.SystemTaskForm
     schedule_model = models.SystemSchedule
     list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
@@ -56,7 +55,7 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         'description',
     )
     filter_horizontal = []
-    list_filter = (CategoryFilter.of_model(model=models.SystemTask), 'tags', 'status', 'parent')
+    list_filter = (generic_admin.CategoryFilter.of_model(model=models.SystemTask), 'tags', 'status', 'parent')
 
     def has_delete_permission(self, request, obj=None):
         if obj and not request.user.is_superuser:
@@ -72,12 +71,11 @@ class SystemTaskAdmin(base_admin.TaskAdmin):
         )
 
 
-class SystemScheduleCallbackAdmin(base_admin.TaskScheduleCallbackAdmin):
+class SystemScheduleCallbackAdmin(generic_admin.TaskScheduleCallbackAdmin):
     pass
 
 
-class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
-
+class SystemScheduleAdmin(generic_admin.TaskScheduleAdmin):
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
     queues = builtins.queues
@@ -90,7 +88,7 @@ class SystemScheduleAdmin(base_admin.TaskScheduleAdmin):
         return True
 
 
-class SystemScheduleLogAdmin(base_admin.TaskScheduleLogAdmin):
+class SystemScheduleLogAdmin(generic_admin.TaskScheduleLogAdmin):
     schedule_retry_name = 'system_schedule_retry'
 
 
@@ -126,24 +124,16 @@ class SystemProcessAdmin(admin.ModelAdmin):
         return False
 
 
-class SystemScheduleQueueAdmin(base_admin.TaskScheduleQueueAdmin):
+class SystemScheduleQueueAdmin(generic_admin.TaskScheduleQueueAdmin):
     form = forms.SystemScheduleQueueForm
     builtins = builtins
     schedule_get_name = 'system_schedule_get'
 
 
-class SystemScheduleProducerAdmin(base_admin.TaskScheduleProducerAdmin):
+class SystemScheduleProducerAdmin(generic_admin.TaskScheduleProducerAdmin):
     form = forms.SystemScheduleProducerForm
     schedule_get_name = 'system_schedule_get'
     builtins = builtins
-
-
-class SystemConsumerPermissionAdmin(base_admin.ConsumerPermissionAdmin):
-    pass
-
-
-class SystemExceptionAdmin(base_admin.ExceptionReportAdmin):
-    pass
 
 
 admin.site.register(models.SystemTask, SystemTaskAdmin)
@@ -153,6 +143,6 @@ admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
 admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
 admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
 admin.site.register(models.SystemProcess, SystemProcessAdmin)
-admin.site.register(models.SystemConsumerPermission, SystemConsumerPermissionAdmin)
-admin.site.register(models.SystemExceptionReport, SystemExceptionAdmin)
+admin.site.register(models.SystemConsumerPermission, generic_admin.ConsumerPermissionAdmin)
+admin.site.register(models.SystemExceptionReport, generic_admin.ExceptionReportAdmin)
 

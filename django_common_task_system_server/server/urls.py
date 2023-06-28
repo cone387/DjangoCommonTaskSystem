@@ -15,9 +15,16 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django_common_task_system.generic import App
+from django.conf import settings
+
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # path('task/', include('django_common_task_system.urls')),
-    path('system', include('django_common_task_system.system_task.urls'))
 ]
+
+if App.user_task in settings.INSTALLED_APPS:
+    urlpatterns.append(path('task', include('django_common_task_system.urls')))
+
+if App.system_task in settings.INSTALLED_APPS:
+    urlpatterns.append(path('system', include('django_common_task_system.system_task.urls')))

@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-from django_common_task_system.models import (
+from django_common_task_system.generic.models import (
     AbstractTask, AbstractTaskSchedule, AbstractTaskScheduleLog, AbstractScheduleCallback,
     AbstractTaskScheduleProducer, AbstractTaskScheduleQueue, AbstractConsumerPermission, AbstractExceptionReport,
 )

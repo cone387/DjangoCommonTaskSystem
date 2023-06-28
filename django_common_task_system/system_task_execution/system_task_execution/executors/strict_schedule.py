@@ -4,9 +4,9 @@ from .base import BaseExecutor, EmptyResult
 from datetime import datetime, timedelta
 from django.db import connection
 from django.utils.module_loading import import_string
-from django_common_task_system.choices import TaskScheduleStatus
+from django_common_task_system.generic.choices import TaskScheduleStatus
 from django_common_task_system.system_task.builtins import builtins
-from django_common_task_system.models import ScheduleConfig, AbstractTaskScheduleLog, \
+from django_common_task_system.generic.models import ScheduleConfig, AbstractTaskScheduleLog, \
     AbstractTaskScheduleProducer, AbstractTaskSchedule
 from django_common_task_system.system_task_execution.system_task_execution.utils import put_schedule
 from urllib.parse import urljoin

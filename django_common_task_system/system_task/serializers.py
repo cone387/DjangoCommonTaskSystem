@@ -1,4 +1,4 @@
-from django_common_task_system import serializers
+from django_common_task_system.generic import serializers
 from rest_framework.serializers import PrimaryKeyRelatedField
 from . import models
 

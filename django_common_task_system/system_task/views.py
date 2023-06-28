@@ -6,28 +6,22 @@ from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
-from django_common_task_system.models import system_initialize_signal
 from .models import (SystemScheduleQueue, SystemSchedule, SystemProcess, SystemScheduleProducer,
                      SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport, SystemTask)
-from django_common_task_system.views import TaskScheduleQueueAPI, TaskScheduleThread, ExceptionReportView
+from django_common_task_system.generic import views as generic_views, system_initialize_signal
+from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
 from .serializers import QueueScheduleSerializer, ExceptionSerializer
 import os
 
 
-builtins.initialize()
-
-
-class SystemScheduleThread(TaskScheduleThread):
-    schedule_model = SystemSchedule
-    queues = builtins.queues
-    producers = builtins.producers
-    serializer = QueueScheduleSerializer
-
-
 @receiver(system_initialize_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
-    thread = SystemScheduleThread()
+    thread = schedule_backend.TaskScheduleThread(
+        schedule_model=SystemSchedule,
+        builtins=builtins,
+        schedule_serializer=QueueScheduleSerializer
+    )
     thread.start()
 
 
@@ -114,15 +108,6 @@ class ScheduleProduceView(APIView):
         return Response({'message': '成功产生%s条数据' % nums, 'nums': nums})
 
 
-class SystemScheduleQueueAPI(TaskScheduleQueueAPI):
-
-    queues = builtins.queues
-    consumer_permissions = builtins.consumer_permissions
-    schedule_model = SystemSchedule
-    log_model = SystemScheduleLog
-    serializer = QueueScheduleSerializer
-
-
 class SystemProcessView:
 
     @staticmethod
@@ -150,7 +135,16 @@ class SystemProcessView:
         return HttpResponse('SystemProcess(%s)已停止' % process_id)
 
 
-class SystemExceptionReportView(ExceptionReportView):
+class SystemExceptionReportView(generic_views.ExceptionReportView):
 
     queryset = SystemExceptionReport.objects.all()
     serializer_class = ExceptionSerializer
+
+
+SystemScheduleQueueAPI = generic_views.TaskScheduleQueueAPI(
+    schedule_mode=SystemSchedule,
+    log_model=SystemScheduleLog,
+    queues=builtins.queues,
+    serializer=QueueScheduleSerializer,
+    consumer_permissions=builtins.consumer_permissions,
+)

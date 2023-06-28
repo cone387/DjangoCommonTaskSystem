@@ -1,4 +1,4 @@
-from django_common_task_system.models import AbstractTaskSchedule
+from django_common_task_system.generic.models import AbstractTaskSchedule
 import requests
 
 

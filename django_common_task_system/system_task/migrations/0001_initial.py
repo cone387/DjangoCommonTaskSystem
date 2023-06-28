@@ -8,6 +8,7 @@ import django.utils.timezone
 import django_common_objects.fields
 import django_common_objects.models
 import django_common_task_system.system_task.models
+import django_common_task_system.generic.models
 
 
 class Migration(migrations.Migration):
@@ -64,7 +65,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(primary_key=True, serialize=False, verbose_name='ID')),
                 ('name', models.CharField(max_length=100, unique=True, verbose_name='队列名称')),
-                ('code', models.CharField(max_length=100, unique=True, validators=[django_common_task_system.models.code_validator], verbose_name='队列编码')),
+                ('code', models.CharField(max_length=100, unique=True, validators=[django_common_task_system.generic.models.code_validator], verbose_name='队列编码')),
                 ('status', models.BooleanField(default=True, verbose_name='状态')),
                 ('module', models.CharField(choices=[('queue.Queue', '普通队列'), ('queue.LifoQueue', '后进先出队列'), ('queue.PriorityQueue', '优先级队列'), ('_queue.SimpleQueue', '简单队列')], default='queue.Queue', max_length=100, verbose_name='队列类型')),
                 ('create_time', models.DateTimeField(auto_now_add=True, verbose_name='创建时间')),

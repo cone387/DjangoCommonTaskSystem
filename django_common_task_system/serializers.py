@@ -1,7 +1,7 @@
-from . import models
-from django_common_objects.serializers import CommonCategorySerializer, CommonTagSerializer
 from rest_framework import serializers
 from . import get_task_model, get_schedule_log_model, get_task_schedule_model
+from . import models
+from django_common_task_system.generic import serializers as generic_serializers
 
 
 TaskModel = get_task_model()
@@ -9,83 +9,48 @@ ScheduleModel = get_task_schedule_model()
 TaskScheduleLogModel = get_schedule_log_model()
 
 
-class TaskSerializer(serializers.ModelSerializer):
-    category = CommonCategorySerializer()
-    tags = CommonTagSerializer(many=True)
-    parent = serializers.SerializerMethodField()
+class TaskSerializer(generic_serializers.TaskSerializer):
 
-    def get_parent(self, obj):
-        if obj.parent:
-            return self.__class__(obj.parent).data
-
-    class Meta:
+    class Meta(generic_serializers.TaskSerializer.Meta):
         model = TaskModel
-        exclude = ('update_time', )
 
 
-class QueueTaskSerializer(TaskSerializer):
-    tags = None
+class QueueTaskSerializer(generic_serializers.QueueTaskSerializer):
 
-    class Meta:
+    class Meta(generic_serializers.QueueTaskSerializer.Meta):
         model = TaskModel
-        # fields = ('id', 'name', 'config', 'category', 'status', 'parent', )
-        exclude = ('user', 'update_time', 'description', 'create_time')
 
 
-class TaskCallbackSerializer(serializers.ModelSerializer):
+class TaskCallbackSerializer(generic_serializers.TaskCallbackSerializer):
 
-    class Meta:
+    class Meta(generic_serializers.TaskCallbackSerializer.Meta):
         model = models.TaskScheduleCallback
-        exclude = ('update_time', )
 
 
-class TaskScheduleSerializer(serializers.ModelSerializer):
+class TaskScheduleSerializer(generic_serializers.TaskScheduleSerializer):
     task = TaskSerializer()
     callback = TaskCallbackSerializer()
 
-    class Meta:
+    class Meta(generic_serializers.TaskScheduleSerializer.Meta):
         model = ScheduleModel
-        exclude = ('update_time', )
 
 
-class QueueScheduleSerializer(TaskScheduleSerializer):
+class QueueScheduleSerializer(generic_serializers.QueueScheduleSerializer):
     task = QueueTaskSerializer()
     callback = TaskCallbackSerializer()
-    schedule_time = serializers.DateTimeField(source="next_schedule_time")
-    generator = serializers.SerializerMethodField()
-    last_log = serializers.SerializerMethodField()
-    queue = serializers.SerializerMethodField()
 
-    @staticmethod
-    def get_last_log(obj):
-        return getattr(obj, 'last_log', None)
-
-    @staticmethod
-    def get_generator(obj):
-        return getattr(obj, 'generator', 'auto')
-
-    @staticmethod
-    def get_queue(obj):
-        return getattr(obj, 'queue')
-
-    class Meta:
+    class Meta(generic_serializers.QueueScheduleSerializer.Meta):
         model = ScheduleModel
-        # fields = ('id', 'task', 'schedule_time', 'update_time', 'callback', 'user')
-        exclude = ('priority', 'create_time', 'next_schedule_time', 'schedule_start_time',
-                   'schedule_end_time', 'status', 'config')
 
 
-class TaskScheduleLogSerializer(serializers.ModelSerializer):
+class TaskScheduleLogSerializer(generic_serializers.TaskScheduleLogSerializer):
     schedule = serializers.PrimaryKeyRelatedField(queryset=ScheduleModel.objects.all())
 
-    class Meta:
+    class Meta(generic_serializers.TaskScheduleLogSerializer.Meta):
         model = TaskScheduleLogModel
-        fields = '__all__'
 
 
-class ExceptionSerializer(serializers.ModelSerializer):
-    ip = serializers.ReadOnlyField()
+class ExceptionSerializer(generic_serializers.ExceptionSerializer):
 
-    class Meta:
+    class Meta(generic_serializers.ExceptionSerializer.Meta):
         model = models.ExceptionReport
-        fields = '__all__'

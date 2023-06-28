@@ -1,4 +1,4 @@
-from django_common_task_system.choices import ConsumerPermissionType
+from django_common_task_system.generic.choices import ConsumerPermissionType
 
 
 class _ConsumerPermissionValidator(dict):
@@ -34,4 +34,3 @@ class IPWhiteListValidator(BaseValidator):
             request.META.get('REMOTE_ADDR')
         if ip not in self.ip_list:
             return "IP %s Not Allowed" % ip
-

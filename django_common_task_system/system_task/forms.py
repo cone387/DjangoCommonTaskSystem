@@ -1,15 +1,13 @@
 from . import models
-from django import forms
 import os
 import time
 import hashlib
 from .process import ProcessManager
 from ..system_task_execution.main import start_system_client
+from django import forms
 from django_common_objects.widgets import JSONWidget
 from django.conf import settings
-from django_common_task_system.forms import (
-    TaskScheduleProducerForm, TaskScheduleQueueForm, CustomProgramField, SqlConfigField
-)
+from django_common_task_system.generic import forms as generic_forms
 
 
 class InitialFileStr(str):
@@ -25,7 +23,7 @@ def get_md5(text):
     return md5.hexdigest()
 
 
-class SystemTaskForm(forms.ModelForm):
+class SystemTaskForm(generic_forms.TaskForm):
     config = forms.JSONField(
         label='配置',
         widget=JSONWidget(attrs={'style': 'width: 70%;'}),
@@ -50,9 +48,9 @@ class SystemTaskForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'style': 'width: 70%;'}),
         required=False
     )
-    sql_config = SqlConfigField(required=False, label="SQL源", help_text="仅支持MySQL, 默认当前数据库")
+    sql_config = generic_forms.SqlConfigField(required=False, label="SQL源", help_text="仅支持MySQL, 默认当前数据库")
     # 不知道为什么这里使用validators时，在admin新增任务时如果validator没通过，第一次会报错，第二次就不会报错了
-    custom_program = CustomProgramField(required=False, help_text='仅支持zip、python、shell格式')
+    custom_program = generic_forms.CustomProgramField(required=False, help_text='仅支持zip、python、shell格式')
 
     executable_path = os.path.join(settings.STATIC_ROOT or os.path.join(os.getcwd(), 'static'), 'executable')
 
@@ -202,13 +200,13 @@ class SystemProcessForm(forms.ModelForm):
         fields = '__all__'
 
 
-class SystemScheduleQueueForm(TaskScheduleQueueForm):
+class SystemScheduleQueueForm(generic_forms.TaskScheduleQueueForm):
 
-    class Meta(TaskScheduleQueueForm.Meta):
+    class Meta(generic_forms.TaskScheduleQueueForm.Meta):
         model = models.SystemScheduleQueue
 
 
-class SystemScheduleProducerForm(TaskScheduleProducerForm):
+class SystemScheduleProducerForm(generic_forms.TaskScheduleProducerForm):
 
-    class Meta(TaskScheduleProducerForm.Meta):
+    class Meta(generic_forms.TaskScheduleProducerForm.Meta):
         model = models.SystemScheduleProducer

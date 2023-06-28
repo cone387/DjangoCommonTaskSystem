@@ -5,13 +5,17 @@ from django.db import connection
 from django_common_task_system.system_task.models import SystemScheduleLog, SystemSchedule
 from django_common_task_system.system_task.builtins import builtins
 from django_common_task_system import get_task_schedule_model, get_schedule_log_model
-from django_common_task_system.models import ScheduleConfig
+from django_common_task_system.generic.schedule_config import ScheduleConfig
 from .. import settings
 
 _columns = None
 
-TaskScheduleLog = get_schedule_log_model()
-TaskSchedule = get_task_schedule_model()
+try:
+    TaskScheduleLog = get_schedule_log_model()
+    TaskSchedule = get_task_schedule_model()
+except AttributeError:
+    TaskScheduleLog = None
+    TaskSchedule = None
 
 
 def get_schedule_table_columns(table):

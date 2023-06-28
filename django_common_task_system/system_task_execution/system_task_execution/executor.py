@@ -5,7 +5,7 @@ import socket
 import requests
 from queue import Queue
 from datetime import datetime
-from django.urls import reverse
+from django.urls import reverse, NoReverseMatch
 from .executors import Executors
 from . import settings
 from urllib.parse import urljoin
@@ -61,7 +61,10 @@ def start_client(queue=None, **kwargs):
     logger.info('system executor start')
     for k, v in os.environ.items():
         logger.info('Env: %s -> %s' % (k, v))
-    consumer_url = urljoin(settings.HOST, reverse('system_schedule_get', args=(queue or builtins.queues.opening.code,)))
+    try:
+        consumer_url = urljoin(settings.HOST, reverse('system_schedule_get', args=(queue or builtins.queues.opening.code,)))
+    except NoReverseMatch:
+        return logger.error('system_schedule_get url not found')
     while True:
         try:
             schedule = get_system_schedule(consumer_url)
