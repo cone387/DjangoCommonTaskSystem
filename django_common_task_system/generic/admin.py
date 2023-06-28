@@ -66,7 +66,9 @@ class TaskAdmin(UserAdmin):
             return format_html('<a href="/admin/%s/%s/?task__id__exact=%s">查看(%s)</a>' % (
                 obj._meta.app_label, self.schedule_model._meta.model_name, obj.id, schedules
             ))
-        return '-'
+        return format_html('<a href="/admin/%s/%s/add/?task=%s">创建计划</a>' % (
+            obj._meta.app_label, self.schedule_model._meta.model_name, obj.id
+        ))
 
     schedules.short_description = '任务计划'
 

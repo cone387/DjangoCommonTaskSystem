@@ -1,48 +1,15 @@
 from django.contrib import admin
-from django.dispatch import receiver
 from django.shortcuts import reverse
 from django.utils.html import format_html
-from django.db.models.signals import post_delete
 from . import models
 from .builtins import builtins
 from . import forms
 from django_common_task_system.generic import admin as generic_admin
-from .process import ProcessManager
-from ..system_task_execution.main import start_system_client
-import os
-
-
-def init_system_process():
-    logs_path = os.path.join(os.getcwd(), 'logs')
-    if not os.path.exists(logs_path):
-        os.mkdir(logs_path)
-    models.SystemProcess.objects.all().delete()
-    name = 'system-process-default'
-    log_file = os.path.join(logs_path, f'{name}.log')
-    instance = models.SystemProcess(
-        process_name=name,
-        log_file=log_file
-    )
-    process = ProcessManager.create(start_system_client, instance.log_file)
-    instance.process_id = process.pid
-    instance.save()
-
-
-if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
-    init_system_process()
-
-
-@receiver(post_delete, sender=models.SystemProcess)
-def delete_process(sender, instance: models.SystemProcess, **kwargs):
-    ProcessManager.kill(instance.process_id)
-    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
-        os.remove(instance.log_file)
 
 
 class SystemTaskAdmin(generic_admin.TaskAdmin):
     form = forms.SystemTaskForm
     schedule_model = models.SystemSchedule
-    list_display = ('id', 'admin_parent', 'name', 'category', 'admin_status', 'schedules', 'update_time')
 
     fields = (
         'category',
@@ -145,4 +112,3 @@ admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
 admin.site.register(models.SystemProcess, SystemProcessAdmin)
 admin.site.register(models.SystemConsumerPermission, generic_admin.ConsumerPermissionAdmin)
 admin.site.register(models.SystemExceptionReport, generic_admin.ExceptionReportAdmin)
-

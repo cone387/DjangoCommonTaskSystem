@@ -11,18 +11,44 @@ from .models import (SystemScheduleQueue, SystemSchedule, SystemProcess, SystemS
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
+from .process import ProcessManager
 from .serializers import QueueScheduleSerializer, ExceptionSerializer
 import os
+from ..system_task_execution.main import start_system_client
+
+
+def init_system_process():
+    logs_path = os.path.join(os.getcwd(), 'logs')
+    if not os.path.exists(logs_path):
+        os.mkdir(logs_path)
+    SystemProcess.objects.all().delete()
+    name = 'system-process-default'
+    log_file = os.path.join(logs_path, f'{name}.log')
+    instance = SystemProcess(
+        process_name=name,
+        log_file=log_file
+    )
+    process = ProcessManager.create(start_system_client, instance.log_file)
+    instance.process_id = process.pid
+    instance.save()
 
 
 @receiver(system_initialize_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
+    init_system_process()
     thread = schedule_backend.TaskScheduleThread(
         schedule_model=SystemSchedule,
         builtins=builtins,
         schedule_serializer=QueueScheduleSerializer
     )
     thread.start()
+
+
+@receiver(post_delete, sender=SystemProcess)
+def delete_process(sender, instance: SystemProcess, **kwargs):
+    ProcessManager.kill(instance.process_id)
+    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
+        os.remove(instance.log_file)
 
 
 @receiver(post_delete, sender=SystemScheduleQueue)

@@ -1,5 +1,4 @@
 from django.contrib import admin
-from django_common_objects.admin import UserAdmin
 from django_common_task_system.generic import admin as generic_admin
 from . import models, forms, get_task_model, get_schedule_log_model, get_task_schedule_model
 from .builtins import builtins
