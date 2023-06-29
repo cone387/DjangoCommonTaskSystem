@@ -1,5 +1,9 @@
 from django.urls import path
 from . import views
+from rest_framework import routers
+
+router = routers.DefaultRouter()
+router.register(r'schedule-log', views.ScheduleLogViewSet)
 
 
 urlpatterns = [
@@ -11,4 +15,4 @@ urlpatterns = [
     path('process/logs/<int:process_id>/', views.SystemProcessView.show_logs, name='system_process_log'),
     path('process/stop/<int:process_id>/', views.SystemProcessView.stop_process, name='system_process_stop'),
     path('exception/report/', views.SystemExceptionReportView.as_view()),
-]
+] + router.urls

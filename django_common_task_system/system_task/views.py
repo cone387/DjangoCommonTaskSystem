@@ -6,13 +6,14 @@ from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from django.http.response import HttpResponse
+from rest_framework.viewsets import ModelViewSet
 from .models import (SystemScheduleQueue, SystemSchedule, SystemProcess, SystemScheduleProducer,
                      SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport, SystemTask)
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
 from .process import ProcessManager
-from .serializers import QueueScheduleSerializer, ExceptionSerializer
+from . import serializers
 import os
 from ..system_task_execution.main import start_system_client
 
@@ -39,7 +40,7 @@ def on_system_initialized(sender, **kwargs):
     thread = schedule_backend.TaskScheduleThread(
         schedule_model=SystemSchedule,
         builtins=builtins,
-        schedule_serializer=QueueScheduleSerializer
+        schedule_serializer=serializers.QueueScheduleSerializer
     )
     thread.start()
 
@@ -114,7 +115,7 @@ class ScheduleProduceView(APIView):
             if schedule.task.config.get('include_meta'):
                 def produce(item):
                     schedule.task.config['content'] = item
-                    queue.put(QueueScheduleSerializer(schedule).data)
+                    queue.put(serializers.QueueScheduleSerializer(schedule).data)
             else:
                 def produce(item):
                     item['task_name'] = schedule.task.name
@@ -162,15 +163,19 @@ class SystemProcessView:
 
 
 class SystemExceptionReportView(generic_views.ExceptionReportView):
-
     queryset = SystemExceptionReport.objects.all()
-    serializer_class = ExceptionSerializer
+    serializer_class = serializers.ExceptionSerializer
+
+
+class ScheduleLogViewSet(ModelViewSet):
+    queryset = SystemScheduleLog.objects.all()
+    serializer_class = serializers.TaskScheduleLogSerializer
 
 
 SystemScheduleQueueAPI = generic_views.TaskScheduleQueueAPI(
     schedule_mode=SystemSchedule,
     log_model=SystemScheduleLog,
     queues=builtins.queues,
-    serializer=QueueScheduleSerializer,
+    serializer=serializers.QueueScheduleSerializer,
     consumer_permissions=builtins.consumer_permissions,
 )

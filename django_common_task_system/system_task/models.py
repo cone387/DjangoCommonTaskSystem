@@ -23,8 +23,6 @@ class SystemScheduleQueue(AbstractTaskScheduleQueue):
 
 
 class SystemScheduleCallback(AbstractScheduleCallback):
-    queue = models.ForeignKey(SystemScheduleQueue, db_constraint=False, related_name='callbacks',
-                              on_delete=models.CASCADE, verbose_name='队列')
 
     class Meta(AbstractScheduleCallback.Meta):
         db_table = 'system_schedule_callback'

@@ -18,12 +18,6 @@ class BuiltinCallbacks(generic_builtins.BuiltinModels):
         )
         super(BuiltinCallbacks, self).__init__()
 
-    def init_object(self, obj):
-        super(BuiltinCallbacks, self).init_object(obj)
-
-    def initialize(self):
-        super(BuiltinCallbacks, self).initialize()
-
 
 class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
     model = TaskScheduleQueue

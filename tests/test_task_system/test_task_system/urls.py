@@ -24,7 +24,7 @@ urlpatterns = [
 ]
 
 if App.user_task in settings.INSTALLED_APPS:
-    urlpatterns.append(path('task', include('django_common_task_system.urls')))
+    urlpatterns.append(path('task/', include('django_common_task_system.urls')))
 
 if App.system_task in settings.INSTALLED_APPS:
-    urlpatterns.append(path('system', include('django_common_task_system.system_task.urls')))
+    urlpatterns.append(path('system/', include('django_common_task_system.system_task.urls')))

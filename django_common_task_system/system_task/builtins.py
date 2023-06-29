@@ -1,22 +1,23 @@
-from django_common_task_system.generic.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType
-from django_common_task_system.generic.builtins import (
-    BaseBuiltinQueues, BaseBuiltinProducers, BaseConsumerPermissions, BaseBuiltins, UserModel,
-    BuiltinModels
-)
+from django_common_task_system.generic.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType, \
+    TaskCallbackEvent, TaskCallbackStatus
+from django_common_task_system.generic import builtins as generic_builtins
 from django_common_task_system.generic import App
 from django_common_objects.models import CommonCategory
-from django_common_task_system.system_task.models import SystemTask, SystemScheduleProducer, SystemSchedule, \
-    SystemConsumerPermission, SystemScheduleLog, SystemScheduleQueue
 from django_common_task_system import get_schedule_log_model, get_task_schedule_model
 from django_common_task_system.utils.foreign_key import get_model_related
+from django.contrib.auth import get_user_model
+from . import models
 
 
-class BuiltinCategories(BuiltinModels):
+UserModel = get_user_model()
+
+
+class BuiltinCategories(generic_builtins.BuiltinModels):
     model = CommonCategory
     model_unique_kwargs = ('name',)
 
     def __init__(self, user):
-        model = SystemTask._meta.label
+        model = models.SystemTask._meta.label
         self.system_default_category = self.model(
             name='系统任务',
             model=model,
@@ -37,8 +38,22 @@ class BuiltinCategories(BuiltinModels):
         super(BuiltinCategories, self).__init__()
 
 
-class BuiltinQueues(BaseBuiltinQueues):
-    model = SystemScheduleQueue
+class BuiltinCallbacks(generic_builtins.BuiltinModels):
+    model = models.SystemScheduleCallback
+    model_unique_kwargs = ['name']
+
+    def __init__(self, user):
+        self.http_log_upload = self.model(
+            name='Http日志上报',
+            trigger_event=TaskCallbackEvent.DONE,
+            status=TaskCallbackStatus.ENABLE.value,
+            user=user,
+        )
+        super(BuiltinCallbacks, self).__init__()
+
+
+class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
+    model = models.SystemScheduleQueue
 
     def __init__(self):
         self.opening = self.model(
@@ -57,8 +72,8 @@ class BuiltinQueues(BaseBuiltinQueues):
         super(BuiltinQueues, self).__init__()
 
 
-class BuiltinProducers(BaseBuiltinProducers):
-    model = SystemScheduleProducer
+class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
+    model = models.SystemScheduleProducer
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = self.model(
@@ -82,8 +97,8 @@ class BuiltinProducers(BaseBuiltinProducers):
         super(BuiltinProducers, self).__init__()
 
 
-class BuiltinTasks(BuiltinModels):
-    model = SystemTask
+class BuiltinTasks(generic_builtins.BuiltinModels):
+    model = models.SystemTask
     model_unique_kwargs = ['name', 'user', 'parent', 'category']
 
     def __init__(self, categories: BuiltinCategories, queues: BuiltinQueues):
@@ -141,7 +156,7 @@ class BuiltinTasks(BuiltinModels):
             user=user,
             config={
                 'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
-                       (SystemScheduleLog._meta.db_table, interval, unit)
+                       (models.SystemScheduleLog._meta.db_table, interval, unit)
             },
         )
 
@@ -158,7 +173,7 @@ class BuiltinTasks(BuiltinModels):
         interval = 1
         unit = 'month'
 
-        if BaseBuiltins.is_app_installed(App.user_task):
+        if generic_builtins.BaseBuiltins.is_app_installed(App.user_task):
             from django_common_task_system.models import TaskScheduleLog
 
             self.task_log_cleaning = self.model(
@@ -187,7 +202,7 @@ class BuiltinTasks(BuiltinModels):
             parent=self.sql_execution_parent_task,
             category=categories.system_test_category,
             config={
-                'script': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table
+                'script': 'select * from %s limit 10;' % models.SystemScheduleLog._meta.db_table
             },
             user=user
         )
@@ -197,7 +212,7 @@ class BuiltinTasks(BuiltinModels):
             parent=self.sql_produce_parent_task,
             category=categories.system_test_category,
             config={
-                'script': 'select * from %s limit 10;' % SystemScheduleLog._meta.db_table,
+                'script': 'select * from %s limit 10;' % models.SystemScheduleLog._meta.db_table,
                 'queue': queues.test.code
             },
             user=user
@@ -218,13 +233,13 @@ class BuiltinTasks(BuiltinModels):
             category=categories.system_default_category,
             user=user,
             config={
-                'schedule_model': SystemSchedule.__module__ + "." + SystemSchedule.__name__,
-                'log_model': SystemScheduleLog.__module__ + "." + SystemScheduleLog.__name__,
+                'schedule_model': models.SystemSchedule.__module__ + "." + models.SystemSchedule.__name__,
+                'log_model': models.SystemScheduleLog.__module__ + "." + models.SystemScheduleLog.__name__,
                 'related': ['task', 'callback'],
             }
         )
 
-        if BaseBuiltins.is_app_installed(App.user_task):
+        if generic_builtins.BaseBuiltins.is_app_installed(App.user_task):
             task_schedule = get_task_schedule_model()
             log_model = get_schedule_log_model()
             self.task_strict_schedule_process = self.model(
@@ -276,9 +291,9 @@ class BuiltinTasks(BuiltinModels):
         super(BuiltinTasks, self).__init__()
 
 
-class BuiltinSchedules(BuiltinModels):
+class BuiltinSchedules(generic_builtins.BuiltinModels):
     model_unique_kwargs = ['task', 'user']
-    model = SystemSchedule
+    model = models.SystemSchedule
 
     def __init__(self, user, tasks: BuiltinTasks):
         self.system_log_cleaning = self.model(
@@ -417,8 +432,8 @@ class BuiltinSchedules(BuiltinModels):
         super(BuiltinSchedules, self).__init__()
 
 
-class BuiltinConsumerPermissions(BaseConsumerPermissions):
-    model = SystemConsumerPermission
+class BuiltinConsumerPermissions(generic_builtins.BaseConsumerPermissions):
+    model = models.SystemConsumerPermission
 
     def __init__(self, producers: BuiltinProducers):
         self.system_consumer_permission = self.model(
@@ -432,13 +447,14 @@ class BuiltinConsumerPermissions(BaseConsumerPermissions):
         super(BuiltinConsumerPermissions, self).__init__()
 
 
-class Builtins(BaseBuiltins):
+class Builtins(generic_builtins.BaseBuiltins):
     app = App.system_task
 
     def __init__(self):
         super(Builtins, self).__init__()
         self.queues = BuiltinQueues()
         self.categories = BuiltinCategories(self.user)
+        self.callbacks = BuiltinCallbacks(self.user)
         self.tasks = BuiltinTasks(self.categories, self.queues)
         self.schedules = BuiltinSchedules(self.user, self.tasks)
         self.producers = BuiltinProducers(self.queues)
