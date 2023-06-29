@@ -22,16 +22,16 @@ def init_system_process():
     logs_path = os.path.join(os.getcwd(), 'logs')
     if not os.path.exists(logs_path):
         os.mkdir(logs_path)
-    SystemProcess.objects.all().delete()
-    name = 'system-process-default'
-    log_file = os.path.join(logs_path, f'{name}.log')
-    instance = SystemProcess(
-        process_name=name,
-        log_file=log_file
-    )
-    process = ProcessManager.create(start_system_client, instance.log_file)
-    instance.process_id = process.pid
-    instance.save()
+    # SystemProcess.objects.all().delete()
+    # name = 'system-process-default'
+    # log_file = os.path.join(logs_path, f'{name}.log')
+    # instance = SystemProcess(
+    #     process_name=name,
+    #     log_file=log_file
+    # )
+    # process = ProcessManager.create(start_system_client, instance.log_file)
+    # instance.process_id = process.pid
+    # instance.save()
 
 
 @receiver(system_initialize_signal, sender='system_initialized')

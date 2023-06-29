@@ -73,6 +73,10 @@ class SystemExceptionReport(AbstractExceptionReport):
     class Meta(AbstractExceptionReport.Meta):
         db_table = 'system_exception_report'
 
+#
+# class SystemProcessManager(models.Manager):
+#
+
 
 class SystemProcess(models.Model):
     id = models.AutoField(primary_key=True, verbose_name='ID')
@@ -85,7 +89,8 @@ class SystemProcess(models.Model):
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
-        db_table = 'system_process'
+        # db_table = 'system_process'
+        managed = False
         verbose_name = verbose_name_plural = '系统进程'
 
     def __str__(self):

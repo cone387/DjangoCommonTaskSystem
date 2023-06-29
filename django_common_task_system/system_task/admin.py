@@ -59,6 +59,25 @@ class SystemScheduleLogAdmin(generic_admin.TaskScheduleLogAdmin):
     schedule_retry_name = 'system_schedule_retry'
 
 
+from django.contrib.admin.views.main import ChangeList
+
+
+class SystemProcessChangeList(ChangeList):
+
+    def __init__(self, *args):
+        super(SystemProcessChangeList, self).__init__(*args)
+
+    def get_queryset(self, request):
+        return [models.SystemProcess(id=1, process_name='test')]
+
+    def get_results(self, request):
+        self.result_count = 1
+        self.result_list = [models.SystemProcess(id=1, process_id=2, process_name='test')]
+        self.full_result_count = 1
+        self.multi_page = False
+        self.can_show_all = True
+
+
 class SystemProcessAdmin(admin.ModelAdmin):
     list_display = ('process_id', 'process_name', 'log_file', 'status', 'stop_process', 'show_log', 'update_time')
     form = forms.SystemProcessForm
@@ -86,6 +105,9 @@ class SystemProcessAdmin(admin.ModelAdmin):
             '<a href="%s" target="_blank">查看日志</a>' % url
         )
     show_log.short_description = '日志'
+
+    def get_changelist(self, request, **kwargs):
+        return SystemProcessChangeList
 
     def has_delete_permission(self, request, obj=None):
         return False
