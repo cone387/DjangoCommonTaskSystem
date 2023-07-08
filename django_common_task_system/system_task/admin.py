@@ -66,16 +66,17 @@ class SystemProcessChangeList(ChangeList):
 
     def __init__(self, *args):
         super(SystemProcessChangeList, self).__init__(*args)
-
-    def get_queryset(self, request):
-        return [models.SystemProcess(id=1, process_name='test')]
-
-    def get_results(self, request):
         self.result_count = 1
         self.result_list = [models.SystemProcess(id=1, process_id=2, process_name='test')]
         self.full_result_count = 1
         self.multi_page = False
         self.can_show_all = True
+
+    def get_queryset(self, request):
+        return []
+
+    def get_results(self, request):
+        pass
 
 
 class SystemProcessAdmin(admin.ModelAdmin):

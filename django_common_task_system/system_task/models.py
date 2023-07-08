@@ -73,25 +73,34 @@ class SystemExceptionReport(AbstractExceptionReport):
     class Meta(AbstractExceptionReport.Meta):
         db_table = 'system_exception_report'
 
-#
-# class SystemProcessManager(models.Manager):
-#
-
 
 class SystemProcess(models.Model):
     id = models.AutoField(primary_key=True, verbose_name='ID')
     process_id = models.PositiveIntegerField(verbose_name='进程ID', unique=True)
     process_name = models.CharField(max_length=100, verbose_name='进程名称')
+    docker_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
+    docker_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
+    docker_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
+    run_on_docker = models.BooleanField(default=False, verbose_name='是否在容器中运行')
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     status = models.BooleanField(default=True, verbose_name='状态')
-    log_file = models.CharField(max_length=200, verbose_name='日志文件')
+    settings = models.JSONField(verbose_name='配置', blank=True, null=True)
+    log_file = models.CharField(max_length=200, verbose_name='日志文件', blank=True, null=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
-        # db_table = 'system_process'
         managed = False
         verbose_name = verbose_name_plural = '系统进程'
 
     def __str__(self):
         return "%s(%s)" % (self.process_name, self.process_id)
+    
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        pass
+
+    def delete(self, using=None, keep_parents=False):
+        pass
+
