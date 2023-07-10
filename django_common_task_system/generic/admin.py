@@ -6,8 +6,10 @@ from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from datetime import datetime
 from django_common_objects.models import CommonCategory
+from django.contrib.admin.views.main import ChangeList
 from . import forms
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
+from .models import TaskClient
 
 
 class CategoryFilter(admin.SimpleListFilter):
@@ -329,3 +331,68 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
+
+
+class TaskClientChangeList(ChangeList):
+
+    def __init__(self, *args):
+        super(TaskClientChangeList, self).__init__(*args)
+        self.result_count = len(TaskClient.all)
+        self.result_list = TaskClient.all
+        self.full_result_count = len(TaskClient.all)
+        self.multi_page = False
+        self.can_show_all = True
+
+    def get_queryset(self, request):
+        return []
+
+    def get_results(self, request):
+        pass
+
+
+class TaskClientAdmin(admin.ModelAdmin):
+    list_display = ('docker_image', 'docker_name', 'docker_id',
+                    'process_id', 'status',
+                    'stop_process', 'show_log', 'create_time')
+    form = forms.TaskClientForm
+    fields = (
+        'run_in_docker',
+        'docker_image',
+        'docker_name',
+        'settings',
+        'env',
+        'process_id',
+        'docker_id',
+        'create_time',
+    )
+
+    readonly_fields = ('create_time', 'update_time')
+
+    def get_list_display_links(self, request, list_display):
+        return ['process_id']
+
+    def stop_process(self, obj):
+        url = reverse('system_process_stop', args=(obj.pk,))
+        return format_html(
+            '<a href="%s" target="_blank">停止</a>' % url
+        )
+    stop_process.short_description = '停止运行'
+
+    def show_log(self, obj):
+        url = reverse('system_process_log', args=(obj.pk,))
+        return format_html(
+            '<a href="%s" target="_blank">查看日志</a>' % url
+        )
+    show_log.short_description = '日志'
+
+    def get_changelist(self, request, **kwargs):
+        return TaskClientChangeList
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_object(self, request, object_id, from_field=None):
+        for i in TaskClient.all:
+            if str(i.process_id) == object_id:
+                return i
+        return None

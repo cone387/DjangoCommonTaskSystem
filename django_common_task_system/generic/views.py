@@ -1,3 +1,8 @@
+import logging
+from logging.handlers import RotatingFileHandler
+from multiprocessing import set_start_method, Process
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
 from rest_framework import status
 from rest_framework.generics import CreateAPIView
 from rest_framework.request import Request
@@ -9,10 +14,82 @@ from datetime import datetime
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
 from django_common_task_system.utils.foreign_key import get_model_related
-from .builtins import BaseBuiltins, BaseBuiltinQueues
+from .builtins import BaseBuiltinQueues
+from .models import TaskClient
+import os
+import sys
+import subprocess
 
 
+SYS_ENCODING = sys.getdefaultencoding()
 UserModel = get_user_model()
+
+
+def run_in_subprocess(cmd):
+    logs = []
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = p.communicate()
+    if out:
+        logs.append(out.decode(SYS_ENCODING))
+    if err:
+        logs.append(err.decode(SYS_ENCODING))
+    return not err, logs
+
+
+@receiver(post_delete, sender=TaskClient)
+def delete_process(sender, instance: TaskClient, **kwargs):
+    ProcessManager.kill(instance.process_id)
+    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
+        os.remove(instance.log_file)
+
+
+@receiver(post_save, sender=TaskClient)
+def add_process(sender, instance: TaskClient, created, **kwargs):
+    if instance.run_in_docker:
+        # pull image
+        image = instance.docker_image
+        if not image:
+            raise ValueError('docker image is required')
+        err, logs = run_in_subprocess(f'docker pull {image}')
+        if err:
+            raise RuntimeError('pull docker image failed: %s' % image)
+        # run container
+        name = 'system-process-default'
+        log_file = os.path.join(os.getcwd(), 'logs', f'{name}.log')
+        cmd = f'docker run -d --name {name} -v {log_file}:/logs/{name}.log {image}'
+        err, logs = run_in_subprocess(cmd)
+        if err:
+            raise RuntimeError('run docker container failed: %s' % image)
+        # get container id
+        cmd = f'docker ps -a | grep {name} | awk \'{{print $1}}\''
+        err, logs = run_in_subprocess(cmd)
+        if err:
+            raise RuntimeError('get docker container id failed: %s' % image)
+    else:
+        set_start_method('spawn', True)
+        os.environ['TASK_CLIENT_SETTINGS_MODULE'] = instance.settings_file.replace(
+            os.getcwd(), '').replace(os.sep, '.').strip('.py')
+        try:
+            from task_system_client.main import start_task_system
+        except ImportError:
+            os.system('pip install common-task-system-client')
+            try:
+                from task_system_client.main import start_task_system
+            except ImportError:
+                raise ImportError('common-task-system-client install failed')
+        from task_system_client.settings import logger
+        logger.handlers.clear()
+        if os.path.isfile(instance.log_file):
+            os.remove(instance.log_file)
+        handler = RotatingFileHandler(instance.log_file, maxBytes=1024 * 1024 * 10, encoding='utf-8', backupCount=5)
+        formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        p = Process(target=start_task_system, daemon=True)
+        p.start()
+        instance.process_id = p.pid
+        instance.status = p.is_alive()
 
 
 class TaskScheduleQueueAPI(object):
@@ -139,3 +216,30 @@ class ExceptionReportView(CreateAPIView):
         meta = self.request.META
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
         serializer.save(ip=ip)
+
+
+class SystemProcessView:
+
+    @staticmethod
+    def show_logs(request: Request, process_id: int):
+        # 此处pk为进程id
+        try:
+            process = TaskClient.objects.get(process_id=process_id)
+        except TaskClient.DoesNotExist:
+            return HttpResponse('SystemProcess(%s)不存在' % process_id)
+        if not os.path.isfile(process.log_file):
+            return HttpResponse('log文件不存在')
+        offset = int(request.GET.get('offset', 0))
+        with open(process.log_file, 'r', encoding='utf-8') as f:
+            f.seek(offset)
+            logs = f.read(offset + 1024 * 1024 * 8)
+        return HttpResponse(logs, content_type='text/plain; charset=utf-8')
+
+    @staticmethod
+    def stop_process(request: Request, process_id: int):
+        try:
+            process = TaskClient.objects.get(process_id=process_id)
+        except TaskClient.DoesNotExist:
+            return HttpResponse('SystemProcess(%s)不存在' % process_id)
+        process.delete()
+        return HttpResponse('SystemProcess(%s)已停止' % process_id)

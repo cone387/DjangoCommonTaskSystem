@@ -5,51 +5,24 @@ from rest_framework.request import Request
 from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
-from django.http.response import HttpResponse
 from rest_framework.viewsets import ModelViewSet
-from .models import (SystemScheduleQueue, SystemSchedule, SystemProcess, SystemScheduleProducer,
+from .models import (SystemScheduleQueue, SystemSchedule, SystemScheduleProducer,
                      SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport, SystemTask)
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
-from .process import ProcessManager
 from . import serializers
 import os
-from ..system_task_execution.main import start_system_client
-
-
-def init_system_process():
-    logs_path = os.path.join(os.getcwd(), 'logs')
-    if not os.path.exists(logs_path):
-        os.mkdir(logs_path)
-    # SystemProcess.objects.all().delete()
-    # name = 'system-process-default'
-    # log_file = os.path.join(logs_path, f'{name}.log')
-    # instance = SystemProcess(
-    #     process_name=name,
-    #     log_file=log_file
-    # )
-    # process = ProcessManager.create(start_system_client, instance.log_file)
-    # instance.process_id = process.pid
-    # instance.save()
 
 
 @receiver(system_initialize_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
-    init_system_process()
     thread = schedule_backend.TaskScheduleThread(
         schedule_model=SystemSchedule,
         builtins=builtins,
         schedule_serializer=serializers.QueueScheduleSerializer
     )
     thread.start()
-
-
-@receiver(post_delete, sender=SystemProcess)
-def delete_process(sender, instance: SystemProcess, **kwargs):
-    ProcessManager.kill(instance.process_id)
-    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
-        os.remove(instance.log_file)
 
 
 @receiver(post_delete, sender=SystemScheduleQueue)
@@ -133,33 +106,6 @@ class ScheduleProduceView(APIView):
         except Exception as e:
             return Response({'message': 'sql语句执行失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': '成功产生%s条数据' % nums, 'nums': nums})
-
-
-class SystemProcessView:
-
-    @staticmethod
-    def show_logs(request: Request, process_id: int):
-        # 此处pk为进程id
-        try:
-            process = SystemProcess.objects.get(process_id=process_id)
-        except SystemProcess.DoesNotExist:
-            return HttpResponse('SystemProcess(%s)不存在' % process_id)
-        if not os.path.isfile(process.log_file):
-            return HttpResponse('log文件不存在')
-        offset = int(request.GET.get('offset', 0))
-        with open(process.log_file, 'r', encoding='utf-8') as f:
-            f.seek(offset)
-            logs = f.read(offset + 1024 * 1024 * 8)
-        return HttpResponse(logs, content_type='text/plain; charset=utf-8')
-
-    @staticmethod
-    def stop_process(request: Request, process_id: int):
-        try:
-            process = SystemProcess.objects.get(process_id=process_id)
-        except SystemProcess.DoesNotExist:
-            return HttpResponse('SystemProcess(%s)不存在' % process_id)
-        process.delete()
-        return HttpResponse('SystemProcess(%s)已停止' % process_id)
 
 
 class SystemExceptionReportView(generic_views.ExceptionReportView):

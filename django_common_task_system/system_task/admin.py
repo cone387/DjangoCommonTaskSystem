@@ -1,10 +1,9 @@
 from django.contrib import admin
-from django.shortcuts import reverse
-from django.utils.html import format_html
 from . import models
 from .builtins import builtins
 from . import forms
 from django_common_task_system.generic import admin as generic_admin
+from django_common_task_system.generic.models import TaskClient
 
 
 class SystemTaskAdmin(generic_admin.TaskAdmin):
@@ -59,61 +58,6 @@ class SystemScheduleLogAdmin(generic_admin.TaskScheduleLogAdmin):
     schedule_retry_name = 'system_schedule_retry'
 
 
-from django.contrib.admin.views.main import ChangeList
-
-
-class SystemProcessChangeList(ChangeList):
-
-    def __init__(self, *args):
-        super(SystemProcessChangeList, self).__init__(*args)
-        self.result_count = 1
-        self.result_list = [models.SystemProcess(id=1, process_id=2, process_name='test')]
-        self.full_result_count = 1
-        self.multi_page = False
-        self.can_show_all = True
-
-    def get_queryset(self, request):
-        return []
-
-    def get_results(self, request):
-        pass
-
-
-class SystemProcessAdmin(admin.ModelAdmin):
-    list_display = ('process_id', 'process_name', 'log_file', 'status', 'stop_process', 'show_log', 'update_time')
-    form = forms.SystemProcessForm
-    fields = (
-        'system_path',
-        'process_name',
-        'env',
-        'log_file',
-        'process_id',
-        'create_time',
-    )
-
-    readonly_fields = ('create_time', 'update_time')
-
-    def stop_process(self, obj):
-        url = reverse('system_process_stop', args=(obj.process_id,))
-        return format_html(
-            '<a href="%s" target="_blank">停止</a>' % url
-        )
-    stop_process.short_description = '停止运行'
-
-    def show_log(self, obj):
-        url = reverse('system_process_log', args=(obj.process_id,))
-        return format_html(
-            '<a href="%s" target="_blank">查看日志</a>' % url
-        )
-    show_log.short_description = '日志'
-
-    def get_changelist(self, request, **kwargs):
-        return SystemProcessChangeList
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-
 class SystemScheduleQueueAdmin(generic_admin.TaskScheduleQueueAdmin):
     form = forms.SystemScheduleQueueForm
     builtins = builtins
@@ -132,6 +76,6 @@ admin.site.register(models.SystemSchedule, SystemScheduleAdmin)
 admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
 admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
 admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
-admin.site.register(models.SystemProcess, SystemProcessAdmin)
+admin.site.register(TaskClient, generic_admin.TaskClientAdmin)
 admin.site.register(models.SystemConsumerPermission, generic_admin.ConsumerPermissionAdmin)
 admin.site.register(models.SystemExceptionReport, generic_admin.ExceptionReportAdmin)

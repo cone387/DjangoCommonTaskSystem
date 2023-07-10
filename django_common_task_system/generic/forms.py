@@ -1,9 +1,13 @@
 import inspect
+import os
+import time
 from django import forms
 from django.contrib.admin import widgets
+from django.core.validators import URLValidator
 from django.utils.module_loading import import_string
 from django_common_task_system.generic.choices import (
     TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus)
+from django_common_task_system.generic.models import TaskClient
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
@@ -11,13 +15,14 @@ from django_common_task_system.generic.models import AbstractTaskSchedule
 from .schedule_config import ScheduleConfig
 from django.forms.renderers import DjangoTemplates
 from pathlib import Path
-from django.conf import settings
+from django.conf import settings as django_settings
+from .client import ClientManager
 
 
 template_path = Path(__file__).parent.parent / 'templates'
 common_task_system_renderer = DjangoTemplates()
 common_task_system_renderer.engine.engine.dirs.append(template_path)
-settings.TEMPLATES[0]['DIRS'].append(str(template_path))
+django_settings.TEMPLATES[0]['DIRS'].append(str(template_path))
 
 
 class CustomProgramWidget(forms.MultiWidget):
@@ -535,4 +540,80 @@ class ConsumerPermissionForm(forms.ModelForm):
         return cleaned_data
 
     class Meta:
+        fields = '__all__'
+
+
+class ReadOnlyWidget(forms.TextInput):
+
+    def __init__(self, attrs=None):
+        attrs = attrs or {
+            'readonly': 'readonly',
+            'style': 'border:none; width: 60%;'
+        }
+        super(ReadOnlyWidget, self).__init__(attrs=attrs)
+
+
+SETTINGS_TEMPLATE = """
+SUBSCRIPTION_ENGINE = {
+    "HttpSubscription": {
+        "subscription_url": "Must be set",
+    },
+
+}
+HTTP_UPLOAD_LOG_CALLBACK = {
+    "url": None
+}
+# DISPATCHER = "task_system_client.task_center.dispatch.ParentAndOptionalNameDispatcher"
+# SUBSCRIPTION = "task_system_client.task_center.subscription.HttpSubscription"
+# EXECUTOR = "task_system_client.executor.base.ParentNameExecutor"
+# SUBSCRIBER = "task_system_client.subscriber.BaseSubscriber"
+# 异常处理
+# EXCEPTION_HANDLER = "task_system_client.handler.exception.ExceptionHandler"
+# EXCEPTION_REPORT_URL = None
+# 并发控制， 为None则不限制
+# SEMAPHORE = 10
+"""
+
+
+class TaskClientForm(forms.ModelForm):
+    process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
+    docker_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
+    docker_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': 'cone387/common-task-system-client:latest'}
+    ), required=False)
+    docker_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': 'common-task-system-client'}
+    ), required=False)
+    settings = forms.CharField(
+        label='配置',
+        max_length=5000,
+        initial=SETTINGS_TEMPLATE,
+        widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": len(SETTINGS_TEMPLATE.split('\n'))}),
+    )
+    env = forms.CharField(
+        label='环境变量',
+        max_length=500,
+        initial='DJANGO_SETTINGS_MODULE=%s' % os.environ.get('DJANGO_SETTINGS_MODULE'),
+        widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": "5"}),
+    )
+
+    def _post_clean(self):
+        pass
+
+    def clean(self):
+        cleaned_data = super(TaskClientForm, self).clean()
+        if not self.errors:
+            settings = cleaned_data.get('settings')
+            if not settings:
+                self.add_error('settings', 'settings不能为空')
+            else:
+                for f in TaskClient._meta.fields:
+                    setattr(self.instance, f.name, cleaned_data.get(f.name))
+                # write settings to file
+                with open(self.instance.settings_file, 'w', encoding='utf-8') as f:
+                    f.write(settings)
+        return cleaned_data
+
+    class Meta:
+        model = TaskClient
         fields = '__all__'

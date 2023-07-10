@@ -1,11 +1,11 @@
 from multiprocessing import Process, set_start_method
-from django_common_task_system.system_task.forms import get_md5
-from django_common_task_system.system_task.models import SystemProcess
+from django_common_task_system.generic.models import TaskClient
 import os
 import subprocess
 import json
 import sys
 
+from django_common_task_system.utils.algorithm import get_md5
 
 SYS_ENCODING = sys.getdefaultencoding()
 
@@ -21,39 +21,27 @@ def run_in_subprocess(cmd):
     return not err, logs
 
 
-class ProcessManager:
-    all = []
+class ClientManager:
 
     @classmethod
-    def start_in_process(cls, process: SystemProcess):
-        logs_path = os.path.join(os.getcwd(), 'logs')
-        if not os.path.exists(logs_path):
-            os.mkdir(logs_path)
-        name = get_md5("%s%s%s%s%s" % (
-            process.process_id, process.process_name,
-            process.docker_image, process.docker_id, process.docker_name
-        ))
-        process.log_file = os.path.join(logs_path, f'{name}.log')
-
+    def start_in_process(cls, client: TaskClient):
         set_start_method('spawn', True)
         try:
             from task_system_client.main import start_task_system
         except ImportError:
-            os.system('pip install task_system_client')
+            os.system('pip install common-task-system-client')
             try:
                 from task_system_client.main import start_task_system
             except ImportError:
-                raise ImportError('task_system_client install failed')
-        with open(process.log_file, 'w') as f:
-            json.dump(process.settings, f)
-        os.environ['COMMON_TASK_SYSTEM_MODULE'] = ''
+                raise ImportError('common-task-system-client install failed')
+        os.environ['COMMON_TASK_SYSTEM_MODULE'] = client.settings_file
         p = Process(target=start_task_system, daemon=True)
         p.start()
-        process.process_id = p.pid
-        cls.all.append(process)
+        client.process_id = p.pid
+        client.status = p.is_alive()
 
     @classmethod
-    def start_in_docker(cls, process: SystemProcess):
+    def start_in_docker(cls, process: TaskClient):
         # pull image
         image = process.docker_image
         if not image:
@@ -75,16 +63,14 @@ class ProcessManager:
             raise RuntimeError('get docker container id failed: %s' % image)
 
     @classmethod
-    def start_process(cls, process: SystemProcess):
-        if process.run_on_docker:
-            cls.start_in_docker(process)
+    def start_client(cls, client: TaskClient):
+        if client.run_in_docker:
+            cls.start_in_docker(client)
         else:
-            cls.start_in_process(process)
+            cls.start_in_process(client)
 
-    def stop(self, process: SystemProcess):
-        if pid in self._processes:
-            self._processes[pid].kill()
-            self._processes.pop(pid)
+    def stop(self, process: TaskClient):
+        pass
 
     def stop_all(self):
         pass
