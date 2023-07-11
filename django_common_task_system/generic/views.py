@@ -16,80 +16,25 @@ from django.contrib.auth import get_user_model
 from django_common_task_system.utils.foreign_key import get_model_related
 from .builtins import BaseBuiltinQueues
 from .models import TaskClient
+from . import client
+from threading import Thread
 import os
-import sys
-import subprocess
 
 
-SYS_ENCODING = sys.getdefaultencoding()
 UserModel = get_user_model()
-
-
-def run_in_subprocess(cmd):
-    logs = []
-    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    out, err = p.communicate()
-    if out:
-        logs.append(out.decode(SYS_ENCODING))
-    if err:
-        logs.append(err.decode(SYS_ENCODING))
-    return not err, logs
 
 
 @receiver(post_delete, sender=TaskClient)
 def delete_process(sender, instance: TaskClient, **kwargs):
-    ProcessManager.kill(instance.process_id)
+    client.kill(instance.process_id)
     if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
         os.remove(instance.log_file)
 
 
 @receiver(post_save, sender=TaskClient)
 def add_process(sender, instance: TaskClient, created, **kwargs):
-    if instance.run_in_docker:
-        # pull image
-        image = instance.docker_image
-        if not image:
-            raise ValueError('docker image is required')
-        err, logs = run_in_subprocess(f'docker pull {image}')
-        if err:
-            raise RuntimeError('pull docker image failed: %s' % image)
-        # run container
-        name = 'system-process-default'
-        log_file = os.path.join(os.getcwd(), 'logs', f'{name}.log')
-        cmd = f'docker run -d --name {name} -v {log_file}:/logs/{name}.log {image}'
-        err, logs = run_in_subprocess(cmd)
-        if err:
-            raise RuntimeError('run docker container failed: %s' % image)
-        # get container id
-        cmd = f'docker ps -a | grep {name} | awk \'{{print $1}}\''
-        err, logs = run_in_subprocess(cmd)
-        if err:
-            raise RuntimeError('get docker container id failed: %s' % image)
-    else:
-        set_start_method('spawn', True)
-        os.environ['TASK_CLIENT_SETTINGS_MODULE'] = instance.settings_file.replace(
-            os.getcwd(), '').replace(os.sep, '.').strip('.py')
-        try:
-            from task_system_client.main import start_task_system
-        except ImportError:
-            os.system('pip install common-task-system-client')
-            try:
-                from task_system_client.main import start_task_system
-            except ImportError:
-                raise ImportError('common-task-system-client install failed')
-        from task_system_client.settings import logger
-        logger.handlers.clear()
-        if os.path.isfile(instance.log_file):
-            os.remove(instance.log_file)
-        handler = RotatingFileHandler(instance.log_file, maxBytes=1024 * 1024 * 10, encoding='utf-8', backupCount=5)
-        formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
-        p = Process(target=start_task_system, daemon=True)
-        p.start()
-        instance.process_id = p.pid
-        instance.status = p.is_alive()
+    thread = Thread(target=client.start_client, args=(instance,))
+    thread.start()
 
 
 class TaskScheduleQueueAPI(object):

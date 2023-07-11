@@ -16,7 +16,6 @@ from .schedule_config import ScheduleConfig
 from django.forms.renderers import DjangoTemplates
 from pathlib import Path
 from django.conf import settings as django_settings
-from .client import ClientManager
 
 
 template_path = Path(__file__).parent.parent / 'templates'
@@ -32,10 +31,10 @@ class CustomProgramWidget(forms.MultiWidget):
         file = widgets.AdminFileWidget()
         args = widgets.AdminTextInputWidget(attrs={'style': 'width: 60%; margin-top: 1px; ',
                                                    'placeholder': '例如: -a 1 -b 2'})
-        docker_image = widgets.AdminTextInputWidget(attrs={'style': 'margin-top: 1px; ',
-                                                           'placeholder': 'common-task-system-client:latest'})
-        run_in_docker = forms.CheckboxInput()
-        super().__init__([file, args, docker_image, run_in_docker], attrs=attrs)
+        container_image = widgets.AdminTextInputWidget(
+            attrs={'style': 'margin-top: 1px; ', 'placeholder': 'common-task-system-client:latest'})
+        run_in_container = forms.CheckboxInput()
+        super().__init__([file, args, container_image, run_in_container], attrs=attrs)
 
     def decompress(self, value):
         if value:
@@ -572,16 +571,17 @@ HTTP_UPLOAD_LOG_CALLBACK = {
 # EXCEPTION_REPORT_URL = None
 # 并发控制， 为None则不限制
 # SEMAPHORE = 10
+
 """
 
 
 class TaskClientForm(forms.ModelForm):
     process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
-    docker_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
-    docker_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
+    container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
+    container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
         attrs={'style': 'width: 60%;', 'placeholder': 'cone387/common-task-system-client:latest'}
     ), required=False)
-    docker_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
+    container_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
         attrs={'style': 'width: 60%;', 'placeholder': 'common-task-system-client'}
     ), required=False)
     settings = forms.CharField(
@@ -602,16 +602,18 @@ class TaskClientForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super(TaskClientForm, self).clean()
-        if not self.errors:
-            settings = cleaned_data.get('settings')
-            if not settings:
-                self.add_error('settings', 'settings不能为空')
-            else:
-                for f in TaskClient._meta.fields:
-                    setattr(self.instance, f.name, cleaned_data.get(f.name))
-                # write settings to file
-                with open(self.instance.settings_file, 'w', encoding='utf-8') as f:
-                    f.write(settings)
+        client: TaskClient = self.instance
+        for f in TaskClient._meta.fields:
+            setattr(client, f.name, cleaned_data.get(f.name))
+        if not client.settings:
+            self.add_error('settings', 'settings不能为空')
+        if client.run_in_container:
+            if not client.container_image:
+                client.container_image = 'cone387/common-task-system-client:latest'
+            if not client.container_name:
+                client.container_name = 'common-task-system-client-%s' % time.strftime("%Y%m%d%H%M%S")
+            # with open(client.settings_file, 'w', encoding='utf-8') as f:
+            #     f.write(client.settings)
         return cleaned_data
 
     class Meta:

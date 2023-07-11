@@ -10,6 +10,8 @@ from django.contrib.admin.views.main import ChangeList
 from . import forms
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
 from .models import TaskClient
+from docker.errors import APIError
+import docker
 
 
 class CategoryFilter(admin.SimpleListFilter):
@@ -344,32 +346,43 @@ class TaskClientChangeList(ChangeList):
         self.can_show_all = True
 
     def get_queryset(self, request):
-        return []
+        client = docker.from_env()
+        objects = []
+        try:
+            containers = client.containers.list(all=True, filters={"name": "common-task-system-client"})
+        except APIError:
+            pass
+        else:
+            for container in containers:
+                objects.append(TaskClient(
+                    container_id=container.short_id,
+                    container_name=container.name,
+                    container_image=container.image.tags[0],
+                    status=container.status,
+                ))
+        return objects
 
     def get_results(self, request):
-        pass
+        self.result_count = len(self.result_list)
 
 
 class TaskClientAdmin(admin.ModelAdmin):
-    list_display = ('docker_image', 'docker_name', 'docker_id',
+    list_display = ('client_id', 'container_image', 'container_name', 'container_id',
                     'process_id', 'status',
                     'stop_process', 'show_log', 'create_time')
     form = forms.TaskClientForm
     fields = (
-        'run_in_docker',
-        'docker_image',
-        'docker_name',
+        'run_in_container',
+        'container_image',
+        'container_name',
         'settings',
         'env',
         'process_id',
-        'docker_id',
+        'container_id',
         'create_time',
     )
 
     readonly_fields = ('create_time', 'update_time')
-
-    def get_list_display_links(self, request, list_display):
-        return ['process_id']
 
     def stop_process(self, obj):
         url = reverse('system_process_stop', args=(obj.pk,))
@@ -393,6 +406,6 @@ class TaskClientAdmin(admin.ModelAdmin):
 
     def get_object(self, request, object_id, from_field=None):
         for i in TaskClient.all:
-            if str(i.process_id) == object_id:
+            if str(i.client_id) == object_id:
                 return i
         return None

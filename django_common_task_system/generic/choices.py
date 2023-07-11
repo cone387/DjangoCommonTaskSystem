@@ -52,3 +52,11 @@ class ScheduleQueueModule(TextChoices):
 class ConsumerPermissionType(TextChoices):
     IP_WHITE_LIST = 'I', 'IP白名单'
 
+
+class TaskClientStatus(TextChoices):
+    INIT = 'I', '初始化'
+    PULLING = 'P', '拉取中'
+    BUILDING = 'B', '构建中'
+    RUNNING = 'R', '运行中'
+    STOPPED = 'S', '已停止'
+    FAILED = 'F', '启动失败'

@@ -3,9 +3,8 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils.functional import cached_property
-
 from django_common_task_system.generic.choices import TaskStatus, TaskScheduleStatus, TaskCallbackStatus, \
-    TaskCallbackEvent, ScheduleQueueModule, ConsumerPermissionType
+    TaskCallbackEvent, ScheduleQueueModule, ConsumerPermissionType, TaskClientStatus
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
 from django_common_task_system.generic import ScheduleConfig
@@ -15,6 +14,8 @@ from django.core.validators import ValidationError
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.utils.algorithm import get_md5
 import os
+import docker
+from docker.errors import APIError
 
 
 UserModel = get_user_model()
@@ -229,13 +230,17 @@ class AbstractExceptionReport(models.Model):
 
 
 class TaskClient(models.Model):
-    process_id = models.PositiveIntegerField(verbose_name='进程ID', primary_key=True)
-    docker_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
-    docker_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
-    docker_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
-    run_in_docker = models.BooleanField(default=False, verbose_name='是否在容器中运行')
+    container = None
+    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
+    container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
+    container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
+    container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
+    run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-    status = models.BooleanField(default=True, verbose_name='状态')
+    status = models.CharField(choices=TaskClientStatus.choices, default=TaskClientStatus.INIT,
+                              max_length=1, verbose_name='状态')
+    startup = models.CharField(max_length=500, verbose_name='启动结果', default='启动成功')
     settings = models.TextField(verbose_name='配置', blank=True, null=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
@@ -247,11 +252,11 @@ class TaskClient(models.Model):
         verbose_name = verbose_name_plural = '系统进程'
 
     def __str__(self):
-        return "%s(%s)" % (self.docker_id, self.process_id)
+        return str(self.client_id)
 
     @cached_property
     def fp(self):
-        return get_md5("%s%s" % (self.docker_id, self.process_id))
+        return get_md5("%s-%s" % (self.container_id, self.process_id))
 
     @cached_property
     def settings_file(self):
@@ -270,6 +275,7 @@ class TaskClient(models.Model):
     def save(
             self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
+        self.client_id = max([c.client_id for c in self.all]) + 1 if self.all else 1
         self.all.append(self)
         post_save.send(
             sender=TaskClient,

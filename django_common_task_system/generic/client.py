@@ -1,13 +1,16 @@
+from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
 from django_common_task_system.generic.models import TaskClient
+from django_common_task_system.generic.choices import TaskClientStatus
+from docker.errors import APIError
 import os
 import subprocess
-import json
-import sys
+import logging
+import locale
+import docker
 
-from django_common_task_system.utils.algorithm import get_md5
 
-SYS_ENCODING = sys.getdefaultencoding()
+SYS_ENCODING = locale.getpreferredencoding()
 
 
 def run_in_subprocess(cmd):
@@ -21,56 +24,59 @@ def run_in_subprocess(cmd):
     return not err, logs
 
 
-class ClientManager:
+def start_in_container(client: TaskClient):
+    # pull image
+    docker_client = docker.from_env()
+    image, tag = client.container_image.split(':') if ':' in client.container_image else (client.container_image, None)
+    client.status = TaskClientStatus.PULLING
+    for _ in range(3):
+        try:
+            container_image = docker_client.images.pull(image, tag=tag)
+            break
+        except APIError:
+            pass
+    else:
+        raise RuntimeError('pull image failed: %s' % client.container_image)
+    container = docker_client.containers.create(container_image, name=client.container_name, detach=True)
+    client.container_id = container.short_id
+    client.container = container
 
-    @classmethod
-    def start_in_process(cls, client: TaskClient):
-        set_start_method('spawn', True)
+
+def start_in_process(client: TaskClient):
+    set_start_method('spawn', True)
+    os.environ['TASK_CLIENT_SETTINGS_MODULE'] = client.settings_file.replace(
+        os.getcwd(), '').replace(os.sep, '.').strip('.py')
+    try:
+        from task_system_client.main import start_task_system
+    except ImportError:
+        os.system('pip install common-task-system-client')
         try:
             from task_system_client.main import start_task_system
         except ImportError:
-            os.system('pip install common-task-system-client')
-            try:
-                from task_system_client.main import start_task_system
-            except ImportError:
-                raise ImportError('common-task-system-client install failed')
-        os.environ['COMMON_TASK_SYSTEM_MODULE'] = client.settings_file
-        p = Process(target=start_task_system, daemon=True)
-        p.start()
-        client.process_id = p.pid
-        client.status = p.is_alive()
+            raise RuntimeError('common-task-system-client install failed')
+    from task_system_client.settings import logger
+    logger.handlers.clear()
+    if os.path.isfile(client.log_file):
+        os.remove(client.log_file)
+    handler = RotatingFileHandler(client.log_file, maxBytes=1024 * 1024 * 10, encoding='utf-8', backupCount=5)
+    formatter = logging.Formatter('[%(asctime)s][%(levelname)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    p = Process(target=start_task_system, daemon=True)
+    p.start()
+    client.client_id = p.pid
+    if not p.is_alive():
+        raise RuntimeError('client process start failed, process is not alive')
 
-    @classmethod
-    def start_in_docker(cls, process: TaskClient):
-        # pull image
-        image = process.docker_image
-        if not image:
-            raise ValueError('docker image is required')
-        err, logs = run_in_subprocess(f'docker pull {image}')
-        if err:
-            raise RuntimeError('pull docker image failed: %s' % image)
-        # run container
-        name = 'system-process-default'
-        log_file = os.path.join(os.getcwd(), 'logs', f'{name}.log')
-        cmd = f'docker run -d --name {name} -v {log_file}:/logs/{name}.log {image}'
-        err, logs = run_in_subprocess(cmd)
-        if err:
-            raise RuntimeError('run docker container failed: %s' % image)
-        # get container id
-        cmd = f'docker ps -a | grep {name} | awk \'{{print $1}}\''
-        err, logs = run_in_subprocess(cmd)
-        if err:
-            raise RuntimeError('get docker container id failed: %s' % image)
 
-    @classmethod
-    def start_client(cls, client: TaskClient):
-        if client.run_in_docker:
-            cls.start_in_docker(client)
+def start_client(client: TaskClient):
+    try:
+        if client.run_in_container:
+            start_in_container(client)
         else:
-            cls.start_in_process(client)
-
-    def stop(self, process: TaskClient):
-        pass
-
-    def stop_all(self):
-        pass
+            start_in_process(client)
+        client.status = TaskClientStatus.RUNNING
+    except Exception as e:
+        client.status = TaskClientStatus.FAILED
+        client.startup = str(e)

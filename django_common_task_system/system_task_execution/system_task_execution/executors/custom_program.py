@@ -151,8 +151,8 @@ class CustomProgramExecutor(BaseExecutor):
         custom_program = self.schedule.task.config.get('custom_program')
         file = custom_program.get('executable')
         args = custom_program.get('args')
-        docker_image = custom_program.get('docker_image') or 'cone387/common-task-system-client'
-        run_in_docker = custom_program.get('run_in_docker', False)
+        container_image = custom_program.get('docker_image') or 'cone387/common-task-system-client'
+        run_in_container = custom_program.get('run_in_docker', False)
         if not os.path.exists(file):
             raise NoRetryException('File(%s) not found' % file)
         # prepare program working path
@@ -164,8 +164,8 @@ class CustomProgramExecutor(BaseExecutor):
             program_file = shutil.copy(file, os.path.join(working_path, os.path.basename(file)))
             program = ProgramExecutor(working_path, file=program_file, args=args)
             program.prepare()
-            if run_in_docker:
-                docker = Docker(program, image=docker_image)
+            if run_in_container:
+                docker = Docker(program, image=container_image)
                 docker.run()
                 logs = docker.logs
             else:
