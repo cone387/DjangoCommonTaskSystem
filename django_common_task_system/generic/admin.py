@@ -6,10 +6,9 @@ from django_common_objects.admin import UserAdmin
 from django.db.models import Count
 from datetime import datetime
 from django_common_objects.models import CommonCategory
-from django.contrib.admin.views.main import ChangeList
 from . import forms
-from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType
-from .models import TaskClient
+from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType, TaskClientStatus
+from .client import TaskClient
 from docker.errors import APIError
 import docker
 
@@ -335,41 +334,11 @@ class ExceptionReportAdmin(admin.ModelAdmin):
         return [field.name for field in self.model._meta.fields]
 
 
-class TaskClientChangeList(ChangeList):
-
-    def __init__(self, *args):
-        super(TaskClientChangeList, self).__init__(*args)
-        self.result_count = len(TaskClient.all)
-        self.result_list = TaskClient.all
-        self.full_result_count = len(TaskClient.all)
-        self.multi_page = False
-        self.can_show_all = True
-
-    def get_queryset(self, request):
-        client = docker.from_env()
-        objects = []
-        try:
-            containers = client.containers.list(all=True, filters={"name": "common-task-system-client"})
-        except APIError:
-            pass
-        else:
-            for container in containers:
-                objects.append(TaskClient(
-                    container_id=container.short_id,
-                    container_name=container.name,
-                    container_image=container.image.tags[0],
-                    status=container.status,
-                ))
-        return objects
-
-    def get_results(self, request):
-        self.result_count = len(self.result_list)
-
-
 class TaskClientAdmin(admin.ModelAdmin):
     list_display = ('client_id', 'container_image', 'container_name', 'container_id',
-                    'process_id', 'status',
-                    'stop_process', 'show_log', 'create_time')
+                    # 'process_id',
+                    'startup_status', 'container_status',
+                    'stop_client', 'show_log', 'create_time')
     form = forms.TaskClientForm
     fields = (
         'run_in_container',
@@ -382,30 +351,48 @@ class TaskClientAdmin(admin.ModelAdmin):
         'create_time',
     )
 
-    readonly_fields = ('create_time', 'update_time')
+    list_filter = ('container_status',)
+    readonly_fields = ('create_time', )
 
-    def stop_process(self, obj):
-        url = reverse('system_process_stop', args=(obj.pk,))
+    def stop_client(self, obj):
+        url = reverse('system_client_stop', args=(obj.pk,))
         return format_html(
             '<a href="%s" target="_blank">停止</a>' % url
         )
-    stop_process.short_description = '停止运行'
+    stop_client.short_description = '停止运行'
 
     def show_log(self, obj):
-        url = reverse('system_process_log', args=(obj.pk,))
+        url = reverse('system_client_log', args=(obj.pk,))
         return format_html(
             '<a href="%s" target="_blank">查看日志</a>' % url
         )
     show_log.short_description = '日志'
 
-    def get_changelist(self, request, **kwargs):
-        return TaskClientChangeList
+    containers_loaded = False
 
-    def has_delete_permission(self, request, obj=None):
+    @classmethod
+    def load_local_containers(cls):
+        if not cls.containers_loaded:
+            cls.containers_loaded = True
+            try:
+                client = docker.from_env()
+                containers = client.containers.list(all=True, filters={"name": "common-task-system-client"})
+            except APIError:
+                pass
+            else:
+                for container in containers:
+                    client = TaskClient(
+                        container_id=container.short_id,
+                        container_name=container.name,
+                        container_image=';'.join(container.image.tags),
+                        container_status=container.status.capitalize(),
+                    )
+                    client.container = container
+                    client.save()
+
+    def get_queryset(self, request):
+        self.load_local_containers()
+        return TaskClient.objects.all()
+
+    def has_change_permission(self, request, obj=None):
         return False
-
-    def get_object(self, request, object_id, from_field=None):
-        for i in TaskClient.all:
-            if str(i.client_id) == object_id:
-                return i
-        return None

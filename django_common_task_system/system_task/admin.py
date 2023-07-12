@@ -3,7 +3,7 @@ from . import models
 from .builtins import builtins
 from . import forms
 from django_common_task_system.generic import admin as generic_admin
-from django_common_task_system.generic.models import TaskClient
+from django_common_task_system.generic.client import TaskClient
 
 
 class SystemTaskAdmin(generic_admin.TaskAdmin):

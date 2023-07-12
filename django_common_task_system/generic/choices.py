@@ -54,9 +54,22 @@ class ConsumerPermissionType(TextChoices):
 
 
 class TaskClientStatus(TextChoices):
-    INIT = 'I', '初始化'
-    PULLING = 'P', '拉取中'
-    BUILDING = 'B', '构建中'
-    RUNNING = 'R', '运行中'
-    STOPPED = 'S', '已停止'
-    FAILED = 'F', '启动失败'
+    # start status
+    INIT = 'Init', '初始化'
+    PULLING = 'Pulling', '拉取镜像中'
+    BUILDING = 'Building', '构建中'
+    SUCCEED = 'Running', '启动成功'
+    FAILED = 'Failed', '启动失败'
+
+
+class ContainerStatus(TextChoices):
+    NONE = 'None'
+    CREATED = 'Created'
+    PAUSED = 'Paused'
+    RUNNING = 'Running'
+    RESTARTING = 'Restarting'
+    OOMKILLED = 'OOMKilled'
+    DEAD = 'Dead'
+    EXITED = 'Exited'
+
+

@@ -7,7 +7,7 @@ from django.core.validators import URLValidator
 from django.utils.module_loading import import_string
 from django_common_task_system.generic.choices import (
     TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus)
-from django_common_task_system.generic.models import TaskClient
+from django_common_task_system.generic.client import TaskClient
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
@@ -576,6 +576,7 @@ HTTP_UPLOAD_LOG_CALLBACK = {
 
 
 class TaskClientForm(forms.ModelForm):
+    run_in_container = forms.BooleanField(label='在容器中运行', initial=True, required=False, widget=forms.HiddenInput())
     process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
     container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
     container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
@@ -600,6 +601,36 @@ class TaskClientForm(forms.ModelForm):
     def _post_clean(self):
         pass
 
+    @staticmethod
+    def validate_settings(client):
+        try:
+            exec(client.settings, None, client.settings_module)
+        except Exception as e:
+            raise forms.ValidationError('settings参数错误: %s' % e)
+        else:
+            SUBSCRIPTION_ENGINE = client.settings_module.get('SUBSCRIPTION_ENGINE')
+            HttpSubscription = SUBSCRIPTION_ENGINE.get('HttpSubscription')
+            RedisSubscription = SUBSCRIPTION_ENGINE.get('RedisSubscription')
+            if HttpSubscription:
+                subscription_url = HttpSubscription.get('subscription_url')
+                if not subscription_url:
+                    raise forms.ValidationError('HttpSubscription.subscription_url不能为空')
+                try:
+                    URLValidator()(subscription_url)
+                except Exception as e:
+                    raise forms.ValidationError('HttpSubscription.subscription_url参数错误: %s' % e)
+            elif RedisSubscription:
+                assert RedisSubscription['engine']['host'], "redis host is required when using RedisSubscription"
+                assert RedisSubscription['engine']['port'], \
+                    "redis port is required when using RedisSubscription"
+                assert RedisSubscription['engine']['db'], \
+                    "redis db is required when using RedisSubscription"
+                assert RedisSubscription['queue'], \
+                    "redis queue is required when using RedisSubscription"
+            else:
+                raise forms.ValidationError('SUBSCRIPTION_ENGINE.HttpSubscription或'
+                                            'SUBSCRIPTION_ENGINE.RedisSubscription不能为空')
+
     def clean(self):
         cleaned_data = super(TaskClientForm, self).clean()
         client: TaskClient = self.instance
@@ -607,6 +638,7 @@ class TaskClientForm(forms.ModelForm):
             setattr(client, f.name, cleaned_data.get(f.name))
         if not client.settings:
             self.add_error('settings', 'settings不能为空')
+        self.validate_settings(client)
         if client.run_in_container:
             if not client.container_image:
                 client.container_image = 'cone387/common-task-system-client:latest'

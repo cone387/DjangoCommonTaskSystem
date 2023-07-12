@@ -1,13 +1,10 @@
-import logging
-from logging.handlers import RotatingFileHandler
-from multiprocessing import set_start_method, Process
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_save
 from django.dispatch import receiver
 from rest_framework import status
 from rest_framework.generics import CreateAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
-from django.http.response import JsonResponse
+from django.http.response import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from queue import Empty
 from datetime import datetime
@@ -15,26 +12,25 @@ from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
 from django_common_task_system.utils.foreign_key import get_model_related
 from .builtins import BaseBuiltinQueues
-from .models import TaskClient
-from . import client
+from .choices import TaskClientStatus
+from .client import start_client, TaskClient
 from threading import Thread
-import os
+from multiprocessing import Process, set_start_method
+from .process import start_client as start_client_process
 
 
 UserModel = get_user_model()
 
 
-@receiver(post_delete, sender=TaskClient)
-def delete_process(sender, instance: TaskClient, **kwargs):
-    client.kill(instance.process_id)
-    if os.path.isfile(instance.log_file) and not instance.log_file.endswith('system-process-default.log'):
-        os.remove(instance.log_file)
-
-
 @receiver(post_save, sender=TaskClient)
 def add_process(sender, instance: TaskClient, created, **kwargs):
-    thread = Thread(target=client.start_client, args=(instance,))
-    thread.start()
+    # thread = Thread(target=start_client, args=(instance,))
+    # thread.start()
+    start_client_process(instance)
+    # set_start_method('spawn', True)
+    # process = Process(target=start_client_process, args=(instance,), daemon=True)
+    # process.start()
+    # print(process)
 
 
 class TaskScheduleQueueAPI(object):
@@ -163,28 +159,26 @@ class ExceptionReportView(CreateAPIView):
         serializer.save(ip=ip)
 
 
-class SystemProcessView:
+class TaskClientView:
 
     @staticmethod
-    def show_logs(request: Request, process_id: int):
+    def show_logs(request: Request, client_id: int):
         # 此处pk为进程id
-        try:
-            process = TaskClient.objects.get(process_id=process_id)
-        except TaskClient.DoesNotExist:
-            return HttpResponse('SystemProcess(%s)不存在' % process_id)
-        if not os.path.isfile(process.log_file):
-            return HttpResponse('log文件不存在')
-        offset = int(request.GET.get('offset', 0))
-        with open(process.log_file, 'r', encoding='utf-8') as f:
-            f.seek(offset)
-            logs = f.read(offset + 1024 * 1024 * 8)
+        client: TaskClient = TaskClient.objects.get(client_id)
+        if client is None:
+            return HttpResponse('TaskClient(%s)不存在' % client_id)
+        if client.startup_status != TaskClientStatus.SUCCEED:
+            return HttpResponse(client.startup_log, content_type='text/plain; charset=utf-8')
+        logs = client.container.logs(tail=1000)
         return HttpResponse(logs, content_type='text/plain; charset=utf-8')
 
     @staticmethod
-    def stop_process(request: Request, process_id: int):
+    def stop_process(request: Request, client_id: int):
+        client = TaskClient.objects.get(client_id=client_id)
+        if client is None:
+            return HttpResponse('TaskClient(%s)不存在' % client_id)
         try:
-            process = TaskClient.objects.get(process_id=process_id)
-        except TaskClient.DoesNotExist:
-            return HttpResponse('SystemProcess(%s)不存在' % process_id)
-        process.delete()
-        return HttpResponse('SystemProcess(%s)已停止' % process_id)
+            client.delete()
+            return HttpResponse('TaskClient(%s)已停止' % client_id)
+        except Exception as e:
+            return HttpResponse('停止TaskClient(%s)失败: %s' % (client_id, e))
