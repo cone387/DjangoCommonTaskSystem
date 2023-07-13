@@ -1,8 +1,7 @@
-from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.generic.choices import TaskStatus, TaskScheduleStatus, TaskCallbackStatus, \
-    TaskCallbackEvent, ScheduleQueueModule, ConsumerPermissionType
+    TaskCallbackEvent, ScheduleQueueModule, ConsumerPermissionType, TaskClientStatus, ContainerStatus
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
 from django_common_task_system.generic import ScheduleConfig
@@ -10,6 +9,13 @@ from datetime import datetime
 import re
 from django.core.validators import ValidationError
 from django_common_task_system.utils import foreign_key
+from django.db.models.signals import post_save
+from django.utils import timezone
+from django.utils.functional import cached_property
+from django_common_task_system.utils.algorithm import get_md5
+from functools import cmp_to_key
+from docker.models.containers import Container
+import os
 
 
 UserModel = get_user_model()
@@ -221,3 +227,148 @@ class AbstractExceptionReport(models.Model):
         return "Exception(%s, %s)" % (self.ip, self.content[:50])
 
     __repr__ = __str__
+
+
+class TaskClientManager(models.Manager, dict):
+
+    class QuerySet(list):
+        class Query:
+            order_by = []
+            select_related = False
+
+        def __init__(self, seq):
+            super().__init__(seq)
+            self.verbose_name = 'TaskClient'
+            self.verbose_name_plural = 'TaskClient'
+            self.query = self.Query
+            self.model = TaskClient
+
+        def filter(self, pk__in=None, **kwargs) -> 'TaskClientManager.QuerySet':
+            if pk__in:
+                return self.__class__(x for x in self if str(x.pk) in pk__in)
+            queryset = self
+            for k, v in kwargs.items():
+                column, op = k.split('__')
+                if op == 'in':
+                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') in v)
+                elif op == 'exact':
+                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') == v)
+            return queryset
+
+        def order_by(self, *args) -> 'TaskClientManager.QuerySet':
+            def custom_sort(x, y):
+                for arg in args:
+                    if arg.startswith('-'):
+                        arg = arg[1:]
+                        reverse = True
+                    else:
+                        reverse = False
+                    if getattr(x, arg) > getattr(y, arg):
+                        return -1 if reverse else 1
+                    elif getattr(x, arg) < getattr(y, arg):
+                        return 1 if reverse else -1
+                return 0
+            self.sort(key=cmp_to_key(custom_sort))
+            return self
+
+        def count(self, value=None) -> int:
+            return len(self)
+
+        def delete(self):
+            for x in self:
+                x.delete()
+
+        def get(self, **kwargs) -> 'TaskClient':
+            for x in self:
+                for k, v in kwargs.items():
+                    if getattr(x, k) != v:
+                        break
+                else:
+                    return x
+            raise TaskClient.DoesNotExist
+
+        def _clone(self):
+            return self
+
+    def all(self):
+        return self.QuerySet(dict.values(self))
+
+    def get(self, client_id, default=None) -> 'TaskClient':
+        return dict.get(self, client_id, default)
+
+    def __get__(self, instance, owner):
+        return self._meta.managers_map[self.manager.name]
+
+
+class TaskClient(models.Model):
+    container: Container = None
+    subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
+    subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
+    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
+    container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
+    container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
+    container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
+    container_status = models.CharField(choices=ContainerStatus.choices, default=ContainerStatus.NONE,
+                                        max_length=20, verbose_name='容器状态')
+    run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
+    env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
+    startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
+                                      verbose_name='启动结果', default=TaskClientStatus.SUCCEED)
+    settings = models.TextField(verbose_name='配置', blank=True, null=True)
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    startup_log = models.CharField(max_length=2000, null=True, blank=True)
+
+    settings_module = {}
+
+    objects = TaskClientManager()
+
+    class Meta:
+        managed = False
+        verbose_name = verbose_name_plural = '系统进程'
+
+    def __str__(self):
+        return str(self.client_id)
+
+    @cached_property
+    def fp(self):
+        return get_md5("%s-%s" % (self.container_id, self.process_id))
+
+    @cached_property
+    def settings_file(self):
+        tmp_path = os.path.join(os.getcwd(), "tmp")
+        if not os.path.exists(tmp_path):
+            os.makedirs(tmp_path)
+        return os.path.join(tmp_path, "settings_%s.py" % self.fp)
+
+    @cached_property
+    def log_file(self):
+        log_path = os.path.join(os.getcwd(), "logs")
+        if not os.path.exists(log_path):
+            os.makedirs(log_path)
+        return os.path.join(log_path, "log_%s.log" % self.fp)
+
+    def save(
+            self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        if not self.client_id:
+            self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
+        TaskClient.objects[self.client_id] = self
+        if self.container is None:
+            self.create_time = timezone.now()
+            post_save.send(
+                sender=TaskClient,
+                instance=self,
+                created=True,
+                update_fields=update_fields,
+                raw=False,
+                using=using,
+            )
+        else:
+            self.create_time = datetime.strptime(self.container.attrs['Created'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
+
+    def delete(self, using=None, keep_parents=False):
+        if self.container is not None:
+            self.container.stop()
+            self.container.remove()
+        TaskClient.objects.pop(self.client_id)

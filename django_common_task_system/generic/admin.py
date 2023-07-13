@@ -8,7 +8,7 @@ from datetime import datetime
 from django_common_objects.models import CommonCategory
 from . import forms
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType, TaskClientStatus
-from .client import TaskClient
+from .models import TaskClient
 from docker.errors import APIError
 import docker
 
@@ -344,6 +344,10 @@ class TaskClientAdmin(admin.ModelAdmin):
         'run_in_container',
         'container_image',
         'container_name',
+        'system_subscription_url',
+        ('system_subscription_scheme', 'system_subscription_host', 'system_subscription_port'),
+        'custom_subscription_url',
+        'subscription_kwargs',
         'settings',
         'env',
         'process_id',

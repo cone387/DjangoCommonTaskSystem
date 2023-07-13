@@ -3,19 +3,21 @@ import os
 import time
 from django import forms
 from django.contrib.admin import widgets
-from django.core.validators import URLValidator
+from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 from django_common_task_system.generic.choices import (
     TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus)
-from django_common_task_system.generic.client import TaskClient
+from django_common_task_system.generic.models import TaskClient, AbstractTaskSchedule, AbstractTaskScheduleQueue
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
-from django_common_task_system.generic.models import AbstractTaskSchedule
 from .schedule_config import ScheduleConfig
 from django.forms.renderers import DjangoTemplates
 from pathlib import Path
 from django.conf import settings as django_settings
+from django.urls import reverse
+from django_common_task_system.utils import ip as ip_utils
+from urllib.parse import urljoin
 
 
 template_path = Path(__file__).parent.parent / 'templates'
@@ -553,15 +555,6 @@ class ReadOnlyWidget(forms.TextInput):
 
 
 SETTINGS_TEMPLATE = """
-SUBSCRIPTION_ENGINE = {
-    "HttpSubscription": {
-        "subscription_url": "Must be set",
-    },
-
-}
-HTTP_UPLOAD_LOG_CALLBACK = {
-    "url": None
-}
 # DISPATCHER = "task_system_client.task_center.dispatch.ParentAndOptionalNameDispatcher"
 # SUBSCRIPTION = "task_system_client.task_center.subscription.HttpSubscription"
 # EXECUTOR = "task_system_client.executor.base.ParentNameExecutor"
@@ -577,6 +570,20 @@ HTTP_UPLOAD_LOG_CALLBACK = {
 
 class TaskClientForm(forms.ModelForm):
     run_in_container = forms.BooleanField(label='在容器中运行', initial=True, required=False, widget=forms.HiddenInput())
+    system_subscription_url = forms.ChoiceField(label='系统订阅地址', required=False)
+    system_subscription_scheme = forms.ChoiceField(label='系统订阅Scheme',
+                                                   choices={x: x for x in ['http', 'https']}.items())
+    system_subscription_host = forms.ChoiceField(label='系统订阅Host')
+    system_subscription_port = forms.IntegerField(label='系统订阅Port', initial=80, min_value=1, max_value=65535)
+    custom_subscription_url = forms.CharField(
+        max_length=300, label='自定义订阅地址', widget=forms.TextInput(
+            attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/task/subscription/'}),
+        required=False, help_text="如果选择了此项，将使用此地址作为订阅地址，忽略选择的系统订阅地址"
+    )
+    subscription_kwargs = forms.CharField(max_length=500, label='订阅参数', widget=forms.Textarea(
+        attrs={'rows': 1, 'style': 'width: 60%;',
+               'placeholder': '{"queue": "test", "command": "select * from table limit 1"}'}
+    ), required=False)
     process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
     container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
     container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
@@ -598,8 +605,45 @@ class TaskClientForm(forms.ModelForm):
         widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": "5"}),
     )
 
+    def __init__(self, *args, **kwargs):
+        super(TaskClientForm, self).__init__(*args, **kwargs)
+        subscription_url_choices = []
+        for queue_model in AbstractTaskScheduleQueue.__subclasses__():
+            app = queue_model._meta.app_label
+            if app == 'django_common_task_system':
+                reverse_name = 'task_schedule_get'
+                name = '通用任务队列'
+            elif app == 'system_task':
+                reverse_name = 'system_schedule_get'
+                name = '系统队列'
+            else:
+                continue
+            queryset = queue_model.objects.filter(status=True)
+            for obj in queryset:
+                path = reverse(reverse_name, kwargs={'code': obj.code})
+                subscription_url_choices.append((path, "%s-%s" % (name, obj.name)))
+        self.fields['system_subscription_url'].choices = subscription_url_choices
+        ip_choices = (
+            ('127.0.0.1', '127.0.0.1'),
+            (self.intranet_ip, "%s(内网)" % self.intranet_ip),
+            (self.internet_ip, "%s(外网)" % self.internet_ip)
+        )
+        self.fields['system_subscription_host'].choices = ip_choices
+        self.initial['system_subscription_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
+
     def _post_clean(self):
         pass
+
+    @cached_property
+    def internet_ip(self):
+        try:
+            return ip_utils.get_internet_ip()
+        except Exception as e:
+            return "获取失败: %s" % str(e)[:50]
+
+    @cached_property
+    def intranet_ip(self):
+        return ip_utils.get_intranet_ip()
 
     @staticmethod
     def validate_settings(client):
@@ -607,35 +651,25 @@ class TaskClientForm(forms.ModelForm):
             exec(client.settings, None, client.settings_module)
         except Exception as e:
             raise forms.ValidationError('settings参数错误: %s' % e)
-        else:
-            SUBSCRIPTION_ENGINE = client.settings_module.get('SUBSCRIPTION_ENGINE')
-            HttpSubscription = SUBSCRIPTION_ENGINE.get('HttpSubscription')
-            RedisSubscription = SUBSCRIPTION_ENGINE.get('RedisSubscription')
-            if HttpSubscription:
-                subscription_url = HttpSubscription.get('subscription_url')
-                if not subscription_url:
-                    raise forms.ValidationError('HttpSubscription.subscription_url不能为空')
-                try:
-                    URLValidator()(subscription_url)
-                except Exception as e:
-                    raise forms.ValidationError('HttpSubscription.subscription_url参数错误: %s' % e)
-            elif RedisSubscription:
-                assert RedisSubscription['engine']['host'], "redis host is required when using RedisSubscription"
-                assert RedisSubscription['engine']['port'], \
-                    "redis port is required when using RedisSubscription"
-                assert RedisSubscription['engine']['db'], \
-                    "redis db is required when using RedisSubscription"
-                assert RedisSubscription['queue'], \
-                    "redis queue is required when using RedisSubscription"
-            else:
-                raise forms.ValidationError('SUBSCRIPTION_ENGINE.HttpSubscription或'
-                                            'SUBSCRIPTION_ENGINE.RedisSubscription不能为空')
 
     def clean(self):
         cleaned_data = super(TaskClientForm, self).clean()
+        if self.errors:
+            return cleaned_data
         client: TaskClient = self.instance
         for f in TaskClient._meta.fields:
             setattr(client, f.name, cleaned_data.get(f.name))
+        client.subscription_url = cleaned_data.get('custom_subscription_url') or urljoin(
+            "%s://%s:%s" % (cleaned_data.get('system_subscription_scheme'),
+                            cleaned_data.get('system_subscription_host'),
+                            cleaned_data.get('system_subscription_port')),
+            cleaned_data.get('system_subscription_url'))
+        if client.subscription_url.startswith('redis'):
+            if not client.subscription_kwargs.get('queue'):
+                raise forms.ValidationError('queue is required for redis subscription')
+        if client.subscription_url.startswith('mysql'):
+            if not client.subscription_kwargs.get('command'):
+                raise forms.ValidationError('command is required for mysql subscription')
         if not client.settings:
             self.add_error('settings', 'settings不能为空')
         self.validate_settings(client)

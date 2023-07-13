@@ -13,24 +13,34 @@ from django.contrib.auth import get_user_model
 from django_common_task_system.utils.foreign_key import get_model_related
 from .builtins import BaseBuiltinQueues
 from .choices import TaskClientStatus
-from .client import start_client, TaskClient
+from .client import start_client
+from .models import TaskClient
 from threading import Thread
-from multiprocessing import Process, set_start_method
-from .process import start_client as start_client_process
 
 
 UserModel = get_user_model()
 
 
+def on_system_shutdown(signum, frame):
+    print('system shutdown, signal: %s' % signum)
+    for client in TaskClient.objects.all():
+        client.delete()
+
+
 @receiver(post_save, sender=TaskClient)
-def add_process(sender, instance: TaskClient, created, **kwargs):
-    # thread = Thread(target=start_client, args=(instance,))
-    # thread.start()
-    start_client_process(instance)
-    # set_start_method('spawn', True)
-    # process = Process(target=start_client_process, args=(instance,), daemon=True)
-    # process.start()
-    # print(process)
+def add_client(sender, instance: TaskClient, created, **kwargs):
+    thread = Thread(target=start_client, args=(instance,))
+    thread.start()
+
+    """
+        ValueError: signal only works in main thread of the main interpreter
+        It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
+        development server in single-threaded mode:
+        $ python manage.py  runserver --nothreading --noreload
+    """
+    # for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
+    #     if sig is not None:
+    #         signal.signal(sig, on_system_shutdown)
 
 
 class TaskScheduleQueueAPI(object):
