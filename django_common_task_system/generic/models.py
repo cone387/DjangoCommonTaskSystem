@@ -213,12 +213,13 @@ class AbstractConsumerPermission(models.Model):
 
 class AbstractExceptionReport(models.Model):
     id = models.AutoField(primary_key=True, verbose_name='ID')
+    group = models.CharField(max_length=100, verbose_name='分组')
     ip = models.CharField(max_length=100, verbose_name='IP')
     content = models.TextField(verbose_name='内容')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
 
     class Meta:
-        db_table = 'task_exception_report'
+        db_table = 'exception_report'
         verbose_name = verbose_name_plural = '异常报告'
         ordering = ('-create_time',)
         abstract = True
@@ -248,7 +249,10 @@ class TaskClientManager(models.Manager, dict):
                 return self.__class__(x for x in self if str(x.pk) in pk__in)
             queryset = self
             for k, v in kwargs.items():
-                column, op = k.split('__')
+                try:
+                    column, op = k.split('__')
+                except ValueError:
+                    column, op = k, 'exact'
                 if op == 'in':
                     queryset = self.__class__(x for x in queryset if getattr(x, column, '') in v)
                 elif op == 'exact':
@@ -296,12 +300,16 @@ class TaskClientManager(models.Manager, dict):
     def get(self, client_id, default=None) -> 'TaskClient':
         return dict.get(self, client_id, default)
 
+    def filter(self, **kwargs) -> 'TaskClientManager.QuerySet':
+        return self.all().filter(**kwargs)
+
     def __get__(self, instance, owner):
         return self._meta.managers_map[self.manager.name]
 
 
 class TaskClient(models.Model):
     container: Container = None
+    group = models.CharField(max_length=100, verbose_name='分组')
     subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
     subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
@@ -325,7 +333,7 @@ class TaskClient(models.Model):
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '系统进程'
+        verbose_name = verbose_name_plural = '客户端'
 
     def __str__(self):
         return str(self.client_id)
@@ -353,6 +361,8 @@ class TaskClient(models.Model):
     ):
         if not self.client_id:
             self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
+        if self.group is None:
+            self.group = self.__class__.__name__
         TaskClient.objects[self.client_id] = self
         if self.container is None:
             self.create_time = timezone.now()

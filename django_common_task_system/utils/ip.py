@@ -13,4 +13,3 @@ def get_internet_ip():
     ip = request.read().decode('utf8').strip()
     request.close()
     return ip
-

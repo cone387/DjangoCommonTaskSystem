@@ -62,9 +62,9 @@ def start_client(queue=None, **kwargs):
     for k, v in os.environ.items():
         logger.info('Env: %s -> %s' % (k, v))
     try:
-        consumer_url = urljoin(settings.HOST, reverse('system_schedule_get', args=(queue or builtins.queues.opening.code,)))
+        consumer_url = urljoin(settings.HOST, reverse('system-schedule-get', args=(queue or builtins.queues.opening.code,)))
     except NoReverseMatch:
-        return logger.error('system_schedule_get url not found')
+        return logger.error('system-schedule-get url not found')
     while True:
         try:
             schedule = get_system_schedule(consumer_url)

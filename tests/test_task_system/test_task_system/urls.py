@@ -23,8 +23,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
 ]
 
-if App.user_task in settings.INSTALLED_APPS:
-    urlpatterns.append(path('task/', include('django_common_task_system.urls')))
+if App.user_task.is_installed:
+    urlpatterns.append(path('user/', include('django_common_task_system.urls')))
 
-if App.system_task in settings.INSTALLED_APPS:
+if App.system_task.is_installed:
     urlpatterns.append(path('system/', include('django_common_task_system.system_task.urls')))

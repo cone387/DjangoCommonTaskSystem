@@ -149,11 +149,11 @@ class StrictScheduleDaemonExecutor(BaseExecutor):
         schedule_interval_errors = errors['schedule_interval']
 
         if self.schedule.__class__ == schedule_model:
-            queue_status_url_name = 'system_schedule_status'
-            handle_url_name = 'system_schedule_put'
+            queue_status_url_name = 'system-schedule-status'
+            handle_url_name = 'system-schedule-put'
         else:
-            queue_status_url_name = 'task_schedule_status'
-            handle_url_name = 'task_schedule_put'
+            queue_status_url_name = 'user-schedule-status'
+            handle_url_name = 'user-schedule-put'
 
         producers = request_producers(schedule_model._meta.app_label)
         queue_status = request_queue_status(queue_status_url_name)

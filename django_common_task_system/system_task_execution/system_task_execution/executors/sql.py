@@ -46,7 +46,7 @@ class SqlProduceExecutor(BaseExecutor):
     name = builtins.tasks.sql_produce_parent_task.name
 
     def execute(self):
-        url = reverse('system_schedule_produce', args=(self.schedule.id,))
+        url = reverse('system-schedule-produce', args=(self.schedule.id,))
         res = requests.post(urljoin(settings.HOST, url))
         if res.status_code != 200:
             raise Exception('produce failed: %s' % res.text)

@@ -35,7 +35,7 @@ class SystemExceptionExecutor(BaseExecutor):
     schedule_id = builtins.schedules.system_exception_handling.id
     schedule_model = SystemSchedule
     schedule_log_model = SystemScheduleLog
-    handle_url = 'system_schedule_retry'
+    handle_url = 'system-schedule-retry'
 
     def execute(self):
         max_retry_times = self.schedule.task.config.get('max_retry_times', 5)
@@ -81,4 +81,4 @@ class ScheduleExceptionExecutor(SystemExceptionExecutor):
     schedule_model = TaskSchedule
     schedule_id = builtins.schedules.task_exception_handling.id
     schedule_log_model = TaskScheduleLog
-    handle_url = 'task_schedule_retry'
+    handle_url = 'user-schedule-retry'

@@ -68,7 +68,7 @@ class SystemConsumerPermission(AbstractConsumerPermission):
         db_table = 'system_consumer_permission'
 
 
-class SystemExceptionReport(AbstractExceptionReport):
-
+class ExceptionReport(AbstractExceptionReport):
+    # 注意Meta默认不会继承，需要手动继承
     class Meta(AbstractExceptionReport.Meta):
-        db_table = 'system_exception_report'
+        pass

@@ -1,8 +1,5 @@
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 from . import serializers, get_task_model, get_schedule_log_model, get_task_schedule_model, get_task_schedule_serializer
 from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
@@ -10,8 +7,6 @@ from .models import TaskSchedule, TaskScheduleProducer, TaskScheduleQueue, \
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
-from jionlp_time import parse_time
-from .utils.schedule_time import nlp_config_to_schedule_config
 from .builtins import builtins
 
 
@@ -84,23 +79,6 @@ class TaskScheduleDetailView(UserRetrieveAPIView):
 class ScheduleLogViewSet(ModelViewSet):
     queryset = ScheduleLogModel.objects.all()
     serializer_class = serializers.TaskScheduleLogSerializer
-
-
-class ScheduleTimeParseView(APIView):
-
-    def get(self, request, *args, **kwargs):
-        sentence = request.query_params.get('sentence')
-        if not sentence:
-            return Response({'error': 'sentence is required'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            result = parse_time(sentence)
-            schedule = nlp_config_to_schedule_config(result, sentence=sentence)
-            return Response({
-                "jio_result": result,
-                "schedule": schedule
-            })
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ExceptionReportView(generic_views.ExceptionReportView):

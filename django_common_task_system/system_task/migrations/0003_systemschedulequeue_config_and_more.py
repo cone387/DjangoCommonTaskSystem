@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
             options={
                 'verbose_name': '计划生产',
                 'verbose_name_plural': '计划生产',
-                'db_table': 'system_schedule_producer',
+                'db_table': 'system-schedule-producer',
                 'abstract': False,
             },
         ),

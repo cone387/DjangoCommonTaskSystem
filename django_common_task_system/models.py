@@ -1,7 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import models
-from django_common_task_system.generic import models as generic_models
-
+from django_common_task_system.generic import models as generic_models, App
 
 UserModel = get_user_model()
 
@@ -59,6 +58,13 @@ class ConsumerPermission(generic_models.AbstractConsumerPermission):
         db_table = 'schedule_consumer_permission'
 
 
-class ExceptionReport(generic_models.AbstractExceptionReport):
-    class Meta(generic_models.AbstractExceptionReport.Meta):
-        db_table = 'task_exception_report'
+if App.system_task.is_installed:
+    from django_common_task_system.system_task.models import ExceptionReport as SystemExceptionReport
+
+    class ExceptionReport(SystemExceptionReport):
+        class Meta(SystemExceptionReport.Meta):
+            proxy = True
+else:
+    class ExceptionReport(generic_models.AbstractExceptionReport):
+        class Meta(generic_models.AbstractExceptionReport.Meta):
+            pass

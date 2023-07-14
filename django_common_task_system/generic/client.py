@@ -41,7 +41,7 @@ def start_in_container(client):
     # pull image
     docker_client = docker.from_env()
     client.startup_status = TaskClientStatus.PULLING
-    command = "common-task-system-client --http-queue-url=%s" % client.subscription_url
+    command = "common-task-system-client --subscription-url=%s" % client.subscription_url
     try:
         container = docker_client.containers.run(
             client.container_image, command=command,
@@ -63,7 +63,7 @@ def start_in_container(client):
     client.container_id = container.short_id
     client.container = container
     container.start()
-    docker_client.containers.get(container.short_id)
+    container = docker_client.containers.get(container.short_id)
     client.container_status = container.status.capitalize()
 
 

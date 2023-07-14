@@ -1,15 +1,18 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from rest_framework import status
 from rest_framework.generics import CreateAPIView
 from rest_framework.request import Request
-from rest_framework.response import Response
 from django.http.response import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from queue import Empty
 from datetime import datetime
 from django_common_objects.models import CommonCategory
 from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from jionlp_time import parse_time
+from django_common_task_system.utils.schedule_time import nlp_config_to_schedule_config
 from django_common_task_system.utils.foreign_key import get_model_related
 from .builtins import BaseBuiltinQueues
 from .choices import TaskClientStatus
@@ -165,8 +168,34 @@ class ExceptionReportView(CreateAPIView):
 
     def perform_create(self, serializer):
         meta = self.request.META
+        group = self.request.POST.get('group')
+        if not group:
+            url_name = self.request.stream.resolver_match.url_name
+            if url_name == 'user-exception-report':
+                group = 'user'
+            elif url_name == 'system-exception-report':
+                group = 'system'
+            else:
+                group = url_name
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
-        serializer.save(ip=ip)
+        serializer.save(ip=ip, group=group)
+
+
+class ScheduleTimeParseView(APIView):
+
+    def get(self, request, *args, **kwargs):
+        sentence = request.query_params.get('sentence')
+        if not sentence:
+            return Response({'error': 'sentence is required'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            result = parse_time(sentence)
+            schedule = nlp_config_to_schedule_config(result, sentence=sentence)
+            return Response({
+                "jio_result": result,
+                "schedule": schedule
+            })
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TaskClientView:

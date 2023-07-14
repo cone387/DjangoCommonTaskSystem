@@ -3,7 +3,6 @@ import os
 import time
 from django import forms
 from django.contrib.admin import widgets
-from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 from django_common_task_system.generic.choices import (
     TaskScheduleType, ScheduleTimingType, TaskScheduleStatus, TaskStatus)
@@ -18,7 +17,7 @@ from django.conf import settings as django_settings
 from django.urls import reverse
 from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
-
+from django_common_task_system.utils.cache import ttl_cache
 
 template_path = Path(__file__).parent.parent / 'templates'
 common_task_system_renderer = DjangoTemplates()
@@ -611,10 +610,10 @@ class TaskClientForm(forms.ModelForm):
         for queue_model in AbstractTaskScheduleQueue.__subclasses__():
             app = queue_model._meta.app_label
             if app == 'django_common_task_system':
-                reverse_name = 'task_schedule_get'
+                reverse_name = 'user-schedule-get'
                 name = '通用任务队列'
             elif app == 'system_task':
-                reverse_name = 'system_schedule_get'
+                reverse_name = 'system-schedule-get'
                 name = '系统队列'
             else:
                 continue
@@ -623,10 +622,13 @@ class TaskClientForm(forms.ModelForm):
                 path = reverse(reverse_name, kwargs={'code': obj.code})
                 subscription_url_choices.append((path, "%s-%s" % (name, obj.name)))
         self.fields['system_subscription_url'].choices = subscription_url_choices
+
+        intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
+        internet_ip = self.get_internet_ip()
         ip_choices = (
-            ('127.0.0.1', '127.0.0.1'),
-            (self.intranet_ip, "%s(内网)" % self.intranet_ip),
-            (self.internet_ip, "%s(外网)" % self.internet_ip)
+            (intranet_ip, "%s(内网)" % intranet_ip),
+            (internet_ip, "%s(外网)" % internet_ip),
+            ('127.0.0.1', '127.0.0.1')
         )
         self.fields['system_subscription_host'].choices = ip_choices
         self.initial['system_subscription_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
@@ -634,16 +636,13 @@ class TaskClientForm(forms.ModelForm):
     def _post_clean(self):
         pass
 
-    @cached_property
-    def internet_ip(self):
+    @staticmethod
+    @ttl_cache()
+    def get_internet_ip():
         try:
             return ip_utils.get_internet_ip()
         except Exception as e:
             return "获取失败: %s" % str(e)[:50]
-
-    @cached_property
-    def intranet_ip(self):
-        return ip_utils.get_intranet_ip()
 
     @staticmethod
     def validate_settings(client):

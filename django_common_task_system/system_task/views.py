@@ -7,7 +7,7 @@ from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from rest_framework.viewsets import ModelViewSet
 from .models import (SystemScheduleQueue, SystemSchedule, SystemScheduleProducer,
-                     SystemScheduleLog, SystemConsumerPermission, SystemExceptionReport, SystemTask)
+                     SystemScheduleLog, SystemConsumerPermission, ExceptionReport, SystemTask)
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
@@ -108,8 +108,8 @@ class ScheduleProduceView(APIView):
         return Response({'message': '成功产生%s条数据' % nums, 'nums': nums})
 
 
-class SystemExceptionReportView(generic_views.ExceptionReportView):
-    queryset = SystemExceptionReport.objects.all()
+class ExceptionReportView(generic_views.ExceptionReportView):
+    queryset = ExceptionReport.objects.all()
     serializer_class = serializers.ExceptionSerializer
 
 

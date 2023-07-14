@@ -1,5 +1,5 @@
-from django.contrib import admin
-from django.urls import reverse
+from django.contrib import admin, messages
+from django.urls import reverse, Resolver404
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django_common_objects.admin import UserAdmin
@@ -10,7 +10,9 @@ from . import forms
 from .choices import TaskScheduleType, ScheduleTimingType, ScheduleQueueModule, ConsumerPermissionType, TaskClientStatus
 from .models import TaskClient
 from docker.errors import APIError
+from django.urls import resolve
 import docker
+from urllib.parse import urlparse
 
 
 class CategoryFilter(admin.SimpleListFilter):
@@ -98,7 +100,7 @@ class TaskScheduleAdmin(UserAdmin):
     task_model = None
     schedule_log_model = None
     queues = None
-    schedule_put_name = 'task_schedule_put'
+    schedule_put_name = 'user-schedule-put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'strict', 'put', 'logs', 'update_time')
     change_list_template = ['admin/system_schedule/change_list.html']
@@ -227,7 +229,7 @@ class TaskScheduleAdmin(UserAdmin):
 
 
 class TaskScheduleLogAdmin(UserAdmin):
-    schedule_retry_name = 'task_schedule_retry'
+    schedule_retry_name = None
     list_display = ('id', 'schedule', 'status', 'retry', 'schedule_time', 'create_time')
     list_filter = ('status', 'schedule')
 
@@ -246,7 +248,7 @@ class TaskScheduleLogAdmin(UserAdmin):
 
 class TaskScheduleQueueAdmin(admin.ModelAdmin):
     builtins = None
-    schedule_get_name = 'task_schedule_get'
+    schedule_get_name = 'user-schedule-get'
 
     list_display = ('id', 'name', 'code', 'queue_url', 'module', 'status', 'queue_size', 'update_time')
 
@@ -275,7 +277,7 @@ class TaskScheduleQueueAdmin(admin.ModelAdmin):
 
 class TaskScheduleProducerAdmin(admin.ModelAdmin):
     builtins = None
-    schedule_get_name = 'task_schedule_get'
+    schedule_get_name = 'user-schedule-get'
     list_display = ('id', 'name', 'producer_queue', 'consumer_url', 'task_num', 'status', 'update_time')
 
     fields = (
@@ -328,15 +330,20 @@ class ConsumerPermissionAdmin(admin.ModelAdmin):
 
 
 class ExceptionReportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'ip', 'content', 'create_time')
+    list_display = ('id', 'group', 'ip', 'content', 'create_time')
+
+    list_filter = ('ip', 'group', 'create_time')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(group=self.model._meta.app_label)
+
 
 class TaskClientAdmin(admin.ModelAdmin):
-    list_display = ('client_id', 'container_image', 'container_name', 'container_id',
-                    # 'process_id',
+    list_display = ('client_id', 'container_id', 'container_name',
+                    'admin_subscription_url',
                     'startup_status', 'container_status',
                     'stop_client', 'show_log', 'create_time')
     form = forms.TaskClientForm
@@ -358,15 +365,24 @@ class TaskClientAdmin(admin.ModelAdmin):
     list_filter = ('container_status',)
     readonly_fields = ('create_time', )
 
+    def admin_subscription_url(self, obj):
+        url = urlparse(obj.subscription_url)
+        return format_html(
+            '<a href="%s" target="_blank">%s</a>' % (
+                obj.subscription_url, url.path
+            )
+        )
+    admin_subscription_url.short_description = '订阅地址'
+
     def stop_client(self, obj):
-        url = reverse('system_client_stop', args=(obj.pk,))
+        url = reverse('system-client-stop', args=(obj.pk,))
         return format_html(
             '<a href="%s" target="_blank">停止</a>' % url
         )
     stop_client.short_description = '停止运行'
 
     def show_log(self, obj):
-        url = reverse('system_client_log', args=(obj.pk,))
+        url = reverse('system-client-log', args=(obj.pk,))
         return format_html(
             '<a href="%s" target="_blank">查看日志</a>' % url
         )
@@ -374,29 +390,45 @@ class TaskClientAdmin(admin.ModelAdmin):
 
     containers_loaded = False
 
-    @classmethod
-    def load_local_containers(cls):
-        if not cls.containers_loaded:
-            cls.containers_loaded = True
+    def load_local_containers(self, request):
+        if not self.containers_loaded:
+            TaskClientAdmin.containers_loaded = True
             try:
                 client = docker.from_env()
-                containers = client.containers.list(all=True, filters={"name": "common-task-system-client"})
-            except APIError:
-                pass
+                containers = client.containers.list(all=True, filters={
+                    "name": "common-task-system-client",
+                    "ancestor": "common-task-system-client"
+                })
+            except APIError as e:
+                self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
             else:
                 for container in containers:
-                    client = TaskClient(
+                    kwargs = {x.split('=')[0].strip('-'): x.split('=')[1] for x in container.attrs['Args']}
+                    subscription_url = kwargs.pop('subscription-url', None)
+                    try:
+                        match = resolve(urlparse(subscription_url).path)
+                    except Resolver404:
+                        group = 'remote'
+                    else:
+                        if match.url_name == 'system-schedule-get':
+                            group = 'SystemTaskClient'
+                        else:
+                            group = 'CustomTaskClient'
+                    client = self.model(
+                        group=group,
                         container_id=container.short_id,
                         container_name=container.name,
-                        container_image=';'.join(container.image.tags),
+                        container_image=';'.join(container.image.tags[:1]),
                         container_status=container.status.capitalize(),
+                        subscription_url=subscription_url,
+                        subscription_kwargs=kwargs,
                     )
                     client.container = container
                     client.save()
 
     def get_queryset(self, request):
-        self.load_local_containers()
-        return TaskClient.objects.all()
+        self.load_local_containers(request)
+        return TaskClient.objects.filter(group=self.model.__name__)
 
     def has_change_permission(self, request, obj=None):
         return False
