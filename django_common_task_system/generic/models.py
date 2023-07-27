@@ -15,6 +15,7 @@ from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
 from docker.models.containers import Container
+from django_common_task_system.generic.app import App
 import os
 
 
@@ -71,7 +72,8 @@ class AbstractScheduleCallback(models.Model):
 
     class Meta:
         verbose_name = verbose_name_plural = '任务回调'
-        unique_together = ('name', 'user')
+        # unique_together = (('name', 'user'), )
+        db_table = 'schedule_callback'
         abstract = True
 
     def __str__(self):
@@ -142,6 +144,7 @@ class AbstractTaskScheduleQueue(models.Model):
 
     class Meta:
         verbose_name = verbose_name_plural = '任务队列'
+        db_table = 'schedule_queue'
         abstract = True
 
     def __str__(self):
@@ -161,6 +164,7 @@ class AbstractTaskScheduleProducer(models.Model):
 
     class Meta:
         verbose_name = verbose_name_plural = '计划生产'
+        db_table = 'schedule_producer'
         abstract = True
 
     def __str__(self):
@@ -202,7 +206,8 @@ class AbstractConsumerPermission(models.Model):
 
     class Meta:
         verbose_name = verbose_name_plural = '消费权限'
-        unique_together = ('producer', 'status')
+        # unique_together = ('producer', 'status')
+        db_table = 'schedule_consumer_permission'
         abstract = True
 
     def __str__(self):
@@ -333,6 +338,7 @@ class TaskClient(models.Model):
 
     class Meta:
         managed = False
+        app_label = App.system_task.split('.')[1] if App.system_task.is_installed else App.user_task
         verbose_name = verbose_name_plural = '客户端'
 
     def __str__(self):

@@ -43,7 +43,7 @@ def start_in_container(client):
     client.startup_status = TaskClientStatus.PULLING
     command = "common-task-system-client --subscription-url=%s" % client.subscription_url
     try:
-        container = docker_client.containers.run(
+        container = docker_client.containers.create(
             client.container_image, command=command,
             name=client.container_name, detach=True)
     except docker.errors.ImageNotFound:

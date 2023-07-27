@@ -8,8 +8,7 @@ from django_common_task_system.generic.models import (
     AbstractTaskScheduleQueue, AbstractTaskScheduleProducer, AbstractConsumerPermission)
 from django_common_task_system.permissions import ConsumerPermissionValidator
 from django.conf import settings
-
-from . import App
+from .app import App, AppStr
 from .signal import system_initialize_signal
 from django.contrib.auth import get_user_model
 
@@ -132,7 +131,7 @@ class BaseConsumerPermissions(BuiltinModels):
 
 
 class BaseBuiltins:
-    app = None
+    app: AppStr = None
 
     def __init__(self):
         self._initialized = False
@@ -145,15 +144,11 @@ class BaseBuiltins:
         for field in user._meta.fields:
             setattr(self.user, field.name, getattr(user, field.name))
 
-    @classmethod
-    def is_app_installed(cls, app=None):
-        return (app or cls.app) in settings.INSTALLED_APPS
-
     def initialize(self):
         if not self._initialized:
             self._initialized = True
             if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
-                if self.is_app_installed:
+                if self.app.is_installed:
                     print('[%s]初始化内置任务' % self.app)
                     self.init_user()
                     for i in self.__dict__.values():

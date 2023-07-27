@@ -373,7 +373,7 @@ class NLPSentenceWidget(forms.TextInput):
     template_name = 'task_schedule/nlp_input.html'
 
 
-class TaskScheduleForm(forms.ModelForm):
+class ScheduleForm(forms.ModelForm):
     default_renderer = common_task_system_renderer
 
     schedule_type = forms.ChoiceField(required=True, label="计划类型", choices=TaskScheduleType.choices)
@@ -399,7 +399,7 @@ class TaskScheduleForm(forms.ModelForm):
                              )
 
     def __init__(self, *args, **kwargs):
-        super(TaskScheduleForm, self).__init__(*args, **kwargs)
+        super(ScheduleForm, self).__init__(*args, **kwargs)
         if self.instance.pk:
             config = self.instance.config
             schedule_type = config.get('schedule_type')
@@ -431,7 +431,7 @@ class TaskScheduleForm(forms.ModelForm):
                     self.initial['timing_datetime'] = timing_config.get('datetime')
 
     def clean(self):
-        cleaned_data = super(TaskScheduleForm, self).clean()
+        cleaned_data = super(ScheduleForm, self).clean()
         cleaned_data.pop("config", None)
         schedule = ScheduleConfig(**cleaned_data)
         cleaned_data['config'] = schedule.config
@@ -453,12 +453,12 @@ class TaskScheduleForm(forms.ModelForm):
         fields = "__all__"
 
 
-class TaskScheduleQueueForm(forms.ModelForm):
+class ScheduleQueueForm(forms.ModelForm):
 
     default_renderer = common_task_system_renderer
 
     def clean(self):
-        cleaned_data = super(TaskScheduleQueueForm, self).clean()
+        cleaned_data = super(ScheduleQueueForm, self).clean()
         if not self.errors:
             module = cleaned_data.get('module')
             config = cleaned_data.get('config')
@@ -486,13 +486,13 @@ class TaskScheduleQueueForm(forms.ModelForm):
         fields = '__all__'
 
 
-class TaskScheduleProducerForm(forms.ModelForm):
+class ScheduleProducerForm(forms.ModelForm):
     default_renderer = common_task_system_renderer
     schedule_model: AbstractTaskSchedule = None
     name = forms.CharField(max_length=100, label='名称', required=False)
 
     def __init__(self, *args, **kwargs):
-        super(TaskScheduleProducerForm, self).__init__(*args, **kwargs)
+        super(ScheduleProducerForm, self).__init__(*args, **kwargs)
         if not self.instance.id:
             self. initial['filters'] = {
                 'status': TaskScheduleStatus.OPENING.value,
@@ -500,7 +500,7 @@ class TaskScheduleProducerForm(forms.ModelForm):
             }
 
     def clean(self):
-        cleaned_data = super(TaskScheduleProducerForm, self).clean()
+        cleaned_data = super(ScheduleProducerForm, self).clean()
         if not self.errors:
             filters = cleaned_data.get('filters')
             if not filters:

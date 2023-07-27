@@ -18,7 +18,7 @@ class QueueTaskSerializer(serializers.QueueTaskSerializer):
 class TaskCallbackSerializer(serializers.TaskCallbackSerializer):
 
     class Meta(serializers.TaskCallbackSerializer.Meta):
-        model = models.SystemScheduleCallback
+        model = models.ScheduleCallback
 
 
 class TaskScheduleSerializer(serializers.TaskScheduleSerializer):

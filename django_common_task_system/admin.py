@@ -1,60 +1,53 @@
 from django.contrib import admin
 from django_common_task_system.generic import admin as generic_admin
 from django_common_task_system.generic import models as generic_models
-from . import models, forms, get_task_model, get_schedule_log_model, get_task_schedule_model
+from . import models, forms, get_user_task_model, get_schedule_log_model, get_user_schedule_model
 from .builtins import builtins
 
-TaskModel = get_task_model()
-ScheduleModel = get_task_schedule_model()
-TaskScheduleLogModel = get_schedule_log_model()
+UserTaskModel = get_user_task_model()
+UserScheduleModel = get_user_schedule_model()
+UserScheduleLogModel = get_schedule_log_model()
 
 
 class TaskAdmin(generic_admin.TaskAdmin):
-    schedule_model = ScheduleModel
+    schedule_model = UserScheduleModel
     form = forms.TaskForm
-    list_filter = (generic_admin.CategoryFilter.of_model(model=TaskModel), 'tags', 'parent')
+    list_filter = (generic_admin.CategoryFilter.of_model(model=UserTaskModel), 'tags', 'parent')
 
 
-class TaskScheduleAdmin(generic_admin.TaskScheduleAdmin):
-    task_model = TaskModel
-    schedule_log_model = TaskScheduleLogModel
+class ScheduleAdmin(generic_admin.ScheduleAdmin):
+    task_model = UserTaskModel
+    schedule_log_model = UserScheduleLogModel
     queues = builtins.queues
     schedule_put_name = 'user-schedule-put'
     form = forms.TaskScheduleForm
 
 
-class TaskScheduleLogAdmin(generic_admin.TaskScheduleLogAdmin):
+class ScheduleLogAdmin(generic_admin.ScheduleLogAdmin):
     schedule_retry_name = 'user-schedule-retry'
 
 
-class TaskScheduleQueueAdmin(generic_admin.TaskScheduleQueueAdmin):
+class ScheduleQueueAdmin(generic_admin.ScheduleQueueAdmin):
     form = forms.TaskScheduleQueueForm
     builtins = builtins
     schedule_get_name = 'user-schedule-get'
 
 
-class TaskScheduleProducerAdmin(generic_admin.TaskScheduleProducerAdmin):
-    form = forms.TaskScheduleProducerForm
+class ScheduleProducerAdmin(generic_admin.ScheduleProducerAdmin):
+    form = forms.ScheduleProducerForm
     builtins = builtins
     schedule_get_name = 'user-schedule-get'
 
 
-class CustomTaskClient(generic_models.TaskClient):
-
-    class Meta:
-        proxy = True
-        verbose_name = verbose_name_plural = '任务客户端'
-
-
-admin.site.register(TaskModel, TaskAdmin)
-admin.site.register(ScheduleModel, TaskScheduleAdmin)
-admin.site.register(models.TaskScheduleCallback, generic_admin.TaskScheduleCallbackAdmin)
-admin.site.register(TaskScheduleLogModel, TaskScheduleLogAdmin)
-admin.site.register(models.TaskScheduleQueue, TaskScheduleQueueAdmin)
-admin.site.register(models.TaskScheduleProducer, TaskScheduleProducerAdmin)
-admin.site.register(models.ConsumerPermission, generic_admin.ConsumerPermissionAdmin)
+admin.site.register(UserTaskModel, TaskAdmin)
+admin.site.register(UserScheduleModel, ScheduleAdmin)
+admin.site.register(models.ScheduleCallback, generic_admin.ScheduleCallbackAdmin)
+admin.site.register(UserScheduleLogModel, ScheduleLogAdmin)
+admin.site.register(models.ScheduleQueue, ScheduleQueueAdmin)
+admin.site.register(models.ScheduleProducer, ScheduleProducerAdmin)
+admin.site.register(models.ScheduleConsumerPermission, generic_admin.ConsumerPermissionAdmin)
 admin.site.register(models.ExceptionReport, generic_admin.ExceptionReportAdmin)
-admin.site.register(CustomTaskClient, generic_admin.TaskClientAdmin)
+admin.site.register(models.UserTaskClient, generic_admin.TaskClientAdmin)
 
 
 admin.site.site_header = '任务管理系统'

@@ -1,38 +1,38 @@
 from . import models
-from . import get_task_schedule_model, get_task_model
+from . import get_user_schedule_model, get_user_task_model
 from django_common_task_system.generic import forms as generic_forms
 
 
-TaskModel = get_task_model()
-ScheduleModel = get_task_schedule_model()
+UserTaskModel = get_user_task_model()
+UserScheduleModel = get_user_schedule_model()
 
 
 class TaskForm(generic_forms.TaskForm):
 
     class Meta(generic_forms.TaskForm.Meta):
-        model = TaskModel
+        model = UserTaskModel
 
 
-class TaskScheduleForm(generic_forms.TaskScheduleForm):
+class TaskScheduleForm(generic_forms.ScheduleForm):
 
-    class Meta(generic_forms.TaskScheduleForm.Meta):
-        model = ScheduleModel
-
-
-class TaskScheduleQueueForm(generic_forms.TaskScheduleQueueForm):
-
-    class Meta(generic_forms.TaskScheduleQueueForm.Meta):
-        model = models.TaskScheduleQueue
+    class Meta(generic_forms.ScheduleForm.Meta):
+        model = UserScheduleModel
 
 
-class TaskScheduleProducerForm(generic_forms.TaskScheduleProducerForm):
-    schedule_model = ScheduleModel
+class TaskScheduleQueueForm(generic_forms.ScheduleQueueForm):
 
-    class Meta(generic_forms.TaskScheduleProducerForm.Meta):
-        model = models.TaskScheduleProducer
+    class Meta(generic_forms.ScheduleQueueForm.Meta):
+        model = models.ScheduleQueue
+
+
+class ScheduleProducerForm(generic_forms.ScheduleProducerForm):
+    schedule_model = UserScheduleModel
+
+    class Meta(generic_forms.ScheduleProducerForm.Meta):
+        model = models.ScheduleProducer
 
 
 class ConsumerPermissionForm(generic_forms.ConsumerPermissionForm):
 
     class Meta(generic_forms.ConsumerPermissionForm.Meta):
-        model = models.ConsumerPermission
+        model = models.ScheduleConsumerPermission

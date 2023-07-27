@@ -85,7 +85,7 @@ class TaskAdmin(UserAdmin):
         return super(TaskAdmin, self).changelist_view(request, extra_context=self.extra_context)
 
 
-class TaskScheduleCallbackAdmin(UserAdmin):
+class ScheduleCallbackAdmin(UserAdmin):
     list_display = ('id', 'name', 'status', 'user', 'update_time')
     fields = (
         "name",
@@ -96,7 +96,7 @@ class TaskScheduleCallbackAdmin(UserAdmin):
     )
 
 
-class TaskScheduleAdmin(UserAdmin):
+class ScheduleAdmin(UserAdmin):
     task_model = None
     schedule_log_model = None
     queues = None
@@ -105,7 +105,7 @@ class TaskScheduleAdmin(UserAdmin):
                     'status', 'strict', 'put', 'logs', 'update_time')
     change_list_template = ['admin/system_schedule/change_list.html']
     # readonly_fields = ("next_schedule_time", )
-    form = forms.TaskScheduleForm
+    form = forms.ScheduleForm
 
     fields = (
         ("task", "status"),
@@ -228,7 +228,7 @@ class TaskScheduleAdmin(UserAdmin):
         }
 
 
-class TaskScheduleLogAdmin(UserAdmin):
+class ScheduleLogAdmin(UserAdmin):
     schedule_retry_name = None
     list_display = ('id', 'schedule', 'status', 'retry', 'schedule_time', 'create_time')
     list_filter = ('status', 'schedule')
@@ -246,7 +246,7 @@ class TaskScheduleLogAdmin(UserAdmin):
     retry.short_description = '重试'
 
 
-class TaskScheduleQueueAdmin(admin.ModelAdmin):
+class ScheduleQueueAdmin(admin.ModelAdmin):
     builtins = None
     schedule_get_name = 'user-schedule-get'
 
@@ -275,7 +275,7 @@ class TaskScheduleQueueAdmin(admin.ModelAdmin):
     queue_url.short_description = '队列地址'
 
 
-class TaskScheduleProducerAdmin(admin.ModelAdmin):
+class ScheduleProducerAdmin(admin.ModelAdmin):
     builtins = None
     schedule_get_name = 'user-schedule-get'
     list_display = ('id', 'name', 'producer_queue', 'consumer_url', 'task_num', 'status', 'update_time')
@@ -413,7 +413,7 @@ class TaskClientAdmin(admin.ModelAdmin):
                         if match.url_name == 'system-schedule-get':
                             group = 'SystemTaskClient'
                         else:
-                            group = 'CustomTaskClient'
+                            group = 'UserTaskClient'
                     client = self.model(
                         group=group,
                         container_id=container.short_id,

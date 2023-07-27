@@ -37,11 +37,11 @@ class SystemTaskAdmin(generic_admin.TaskAdmin):
         )
 
 
-class SystemScheduleCallbackAdmin(generic_admin.TaskScheduleCallbackAdmin):
+class SystemScheduleCallbackAdmin(generic_admin.ScheduleCallbackAdmin):
     pass
 
 
-class SystemScheduleAdmin(generic_admin.TaskScheduleAdmin):
+class SystemScheduleAdmin(generic_admin.ScheduleAdmin):
     task_model = models.SystemTask
     schedule_log_model = models.SystemScheduleLog
     queues = builtins.queues
@@ -54,34 +54,28 @@ class SystemScheduleAdmin(generic_admin.TaskScheduleAdmin):
         return True
 
 
-class SystemScheduleLogAdmin(generic_admin.TaskScheduleLogAdmin):
+class SystemScheduleLogAdmin(generic_admin.ScheduleLogAdmin):
     schedule_retry_name = 'system-schedule-retry'
 
 
-class SystemScheduleQueueAdmin(generic_admin.TaskScheduleQueueAdmin):
+class SystemScheduleQueueAdmin(generic_admin.ScheduleQueueAdmin):
     form = forms.SystemScheduleQueueForm
     builtins = builtins
     schedule_get_name = 'system-schedule-get'
 
 
-class SystemScheduleProducerAdmin(generic_admin.TaskScheduleProducerAdmin):
+class SystemScheduleProducerAdmin(generic_admin.ScheduleProducerAdmin):
     form = forms.SystemScheduleProducerForm
     schedule_get_name = 'system-schedule-get'
     builtins = builtins
 
 
-class SystemTaskClient(generic_models.TaskClient):
-    class Meta:
-        proxy = True
-        verbose_name = verbose_name_plural = '任务客户端'
-
-
 admin.site.register(models.SystemTask, SystemTaskAdmin)
-admin.site.register(models.SystemScheduleCallback, SystemScheduleCallbackAdmin)
+admin.site.register(models.ScheduleCallback, SystemScheduleCallbackAdmin)
 admin.site.register(models.SystemSchedule, SystemScheduleAdmin)
 admin.site.register(models.SystemScheduleLog, SystemScheduleLogAdmin)
-admin.site.register(models.SystemScheduleQueue, SystemScheduleQueueAdmin)
-admin.site.register(models.SystemScheduleProducer, SystemScheduleProducerAdmin)
-admin.site.register(models.SystemConsumerPermission, generic_admin.ConsumerPermissionAdmin)
+admin.site.register(models.ScheduleQueue, SystemScheduleQueueAdmin)
+admin.site.register(models.ScheduleProducer, SystemScheduleProducerAdmin)
+admin.site.register(models.ScheduleConsumerPermission, generic_admin.ConsumerPermissionAdmin)
 admin.site.register(models.ExceptionReport, generic_admin.ExceptionReportAdmin)
-admin.site.register(SystemTaskClient, generic_admin.TaskClientAdmin)
+admin.site.register(models.SystemTaskClient, generic_admin.TaskClientAdmin)

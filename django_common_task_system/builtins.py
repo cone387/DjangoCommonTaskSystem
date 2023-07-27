@@ -1,17 +1,18 @@
 from django_common_task_system.generic.choices import TaskCallbackEvent, TaskCallbackStatus, TaskScheduleStatus, \
     ScheduleQueueModule
-from django_common_task_system.models import TaskScheduleCallback, \
-    ConsumerPermission, TaskScheduleQueue, TaskScheduleProducer
-from django_common_task_system.generic import builtins as generic_builtins, App
+from django_common_task_system.models import ScheduleCallback, \
+    ScheduleConsumerPermission, ScheduleQueue, ScheduleProducer
+from django_common_task_system.generic import builtins as generic_builtins
+from django_common_task_system.generic.app import App
 
 
 class BuiltinCallbacks(generic_builtins.BuiltinModels):
-    model = TaskScheduleCallback
+    model = ScheduleCallback
     model_unique_kwargs = ['name']
 
     def __init__(self, user):
         self.http_log_upload = self.model(
-            name='Http日志上报',
+            name='HTTP日志上报',
             trigger_event=TaskCallbackEvent.DONE,
             status=TaskCallbackStatus.ENABLE.value,
             user=user,
@@ -20,7 +21,7 @@ class BuiltinCallbacks(generic_builtins.BuiltinModels):
 
 
 class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
-    model = TaskScheduleQueue
+    model = ScheduleQueue
 
     def __init__(self):
         self.opening = self.model(
@@ -39,7 +40,7 @@ class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
 
 
 class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
-    model = TaskScheduleProducer
+    model = ScheduleProducer
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = self.model(
@@ -65,7 +66,7 @@ class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
 
 
 class BuiltinConsumerPermissions(generic_builtins.BaseConsumerPermissions):
-    model = ConsumerPermission
+    model = ScheduleConsumerPermission
 
 
 class Builtins(generic_builtins.BaseBuiltins):

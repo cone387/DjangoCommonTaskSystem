@@ -1,9 +1,9 @@
 from django_common_task_system.generic.choices import ScheduleQueueModule, TaskScheduleStatus, ConsumerPermissionType, \
     TaskCallbackEvent, TaskCallbackStatus
 from django_common_task_system.generic import builtins as generic_builtins
-from django_common_task_system.generic import App
+from django_common_task_system.generic.app import App
 from django_common_objects.models import CommonCategory
-from django_common_task_system import get_schedule_log_model, get_task_schedule_model
+from django_common_task_system import get_schedule_log_model, get_user_schedule_model
 from django_common_task_system.utils.foreign_key import get_model_related
 from django.contrib.auth import get_user_model
 from . import models
@@ -39,7 +39,7 @@ class BuiltinCategories(generic_builtins.BuiltinModels):
 
 
 class BuiltinCallbacks(generic_builtins.BuiltinModels):
-    model = models.SystemScheduleCallback
+    model = models.ScheduleCallback
     model_unique_kwargs = ['name']
 
     def __init__(self, user):
@@ -53,7 +53,7 @@ class BuiltinCallbacks(generic_builtins.BuiltinModels):
 
 
 class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
-    model = models.SystemScheduleQueue
+    model = models.ScheduleQueue
 
     def __init__(self):
         self.opening = self.model(
@@ -73,7 +73,7 @@ class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
 
 
 class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
-    model = models.SystemScheduleProducer
+    model = models.ScheduleProducer
 
     def __init__(self, queues: BuiltinQueues):
         self.opening = self.model(
@@ -173,8 +173,8 @@ class BuiltinTasks(generic_builtins.BuiltinModels):
         interval = 1
         unit = 'month'
 
-        if generic_builtins.BaseBuiltins.is_app_installed(App.user_task):
-            from django_common_task_system.models import TaskScheduleLog
+        if App.user_task.is_installed:
+            from django_common_task_system.models import UserScheduleLog
 
             self.task_log_cleaning = self.model(
                 name='任务日志清理',
@@ -183,7 +183,7 @@ class BuiltinTasks(generic_builtins.BuiltinModels):
                 parent=self.sql_execution_parent_task,
                 config={
                     'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
-                           (TaskScheduleLog._meta.db_table, interval, unit)
+                           (UserScheduleLog._meta.db_table, interval, unit)
                 },
             )
 
@@ -239,8 +239,8 @@ class BuiltinTasks(generic_builtins.BuiltinModels):
             }
         )
 
-        if generic_builtins.BaseBuiltins.is_app_installed(App.user_task):
-            task_schedule = get_task_schedule_model()
+        if App.user_task.is_installed:
+            task_schedule = get_user_schedule_model()
             log_model = get_schedule_log_model()
             self.task_strict_schedule_process = self.model(
                 name='普通任务严格模式任务处理',
@@ -433,7 +433,7 @@ class BuiltinSchedules(generic_builtins.BuiltinModels):
 
 
 class BuiltinConsumerPermissions(generic_builtins.BaseConsumerPermissions):
-    model = models.SystemConsumerPermission
+    model = models.ScheduleConsumerPermission
 
     def __init__(self, producers: BuiltinProducers):
         self.system_consumer_permission = self.model(

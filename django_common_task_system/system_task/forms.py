@@ -4,6 +4,7 @@ from django import forms
 from django_common_objects.widgets import JSONWidget
 from django.conf import settings
 from django_common_task_system.generic import forms as generic_forms
+from ..utils.algorithm import get_md5
 
 
 class InitialFileStr(str):
@@ -21,7 +22,7 @@ class SystemTaskForm(generic_forms.TaskForm):
         required=False,
     )
     queue = forms.ModelChoiceField(
-        queryset=models.SystemScheduleQueue.objects.all(),
+        queryset=models.ScheduleQueue.objects.all(),
         required=False,
         label='任务队列',
         widget=forms.Select(attrs={'class': 'form-control'})
@@ -50,7 +51,7 @@ class SystemTaskForm(generic_forms.TaskForm):
             config = self.instance.config
             queue = config.get('queue')
             if queue:
-                self.initial['queue'] = models.SystemScheduleQueue.objects.get(code=queue)
+                self.initial['queue'] = models.ScheduleQueue.objects.get(code=queue)
             self.initial['script'] = config.get('script')
             self.initial['include_meta'] = config.get('include_meta')
             custom_program = config.get('custom_program')
@@ -140,13 +141,13 @@ class SystemTaskForm(generic_forms.TaskForm):
         fields = '__all__'
 
 
-class SystemScheduleQueueForm(generic_forms.TaskScheduleQueueForm):
+class SystemScheduleQueueForm(generic_forms.ScheduleQueueForm):
 
-    class Meta(generic_forms.TaskScheduleQueueForm.Meta):
-        model = models.SystemScheduleQueue
+    class Meta(generic_forms.ScheduleQueueForm.Meta):
+        model = models.ScheduleQueue
 
 
-class SystemScheduleProducerForm(generic_forms.TaskScheduleProducerForm):
+class SystemScheduleProducerForm(generic_forms.ScheduleProducerForm):
 
-    class Meta(generic_forms.TaskScheduleProducerForm.Meta):
-        model = models.SystemScheduleProducer
+    class Meta(generic_forms.ScheduleProducerForm.Meta):
+        model = models.ScheduleProducer

@@ -6,8 +6,8 @@ from rest_framework import status
 from django.db.models.signals import post_save, post_delete
 from django.db import connection
 from rest_framework.viewsets import ModelViewSet
-from .models import (SystemScheduleQueue, SystemSchedule, SystemScheduleProducer,
-                     SystemScheduleLog, SystemConsumerPermission, ExceptionReport, SystemTask)
+from .models import (ScheduleQueue, SystemSchedule, ScheduleProducer,
+                     SystemScheduleLog, ScheduleConsumerPermission, ExceptionReport, SystemTask)
 from django_common_task_system.generic import views as generic_views, system_initialize_signal
 from django_common_task_system.generic import schedule_backend
 from .builtins import builtins
@@ -25,33 +25,33 @@ def on_system_initialized(sender, **kwargs):
     thread.start()
 
 
-@receiver(post_delete, sender=SystemScheduleQueue)
-def delete_queue(sender, instance: SystemScheduleQueue, **kwargs):
+@receiver(post_delete, sender=ScheduleQueue)
+def delete_queue(sender, instance: ScheduleQueue, **kwargs):
     builtins.queues.delete(instance)
 
 
-@receiver(post_save, sender=SystemScheduleQueue)
-def add_queue(sender, instance: SystemScheduleQueue, created, **kwargs):
+@receiver(post_save, sender=ScheduleQueue)
+def add_queue(sender, instance: ScheduleQueue, created, **kwargs):
     builtins.queues.add(instance)
 
 
-@receiver(post_delete, sender=SystemScheduleProducer)
-def delete_producer(sender, instance: SystemScheduleProducer, **kwargs):
+@receiver(post_delete, sender=ScheduleProducer)
+def delete_producer(sender, instance: ScheduleProducer, **kwargs):
     builtins.producers.delete(instance)
 
 
-@receiver(post_save, sender=SystemScheduleProducer)
-def add_producer(sender, instance: SystemScheduleProducer, created, **kwargs):
+@receiver(post_save, sender=ScheduleProducer)
+def add_producer(sender, instance: ScheduleProducer, created, **kwargs):
     builtins.producers.add(instance)
 
 
-@receiver(post_save, sender=SystemConsumerPermission)
-def add_consumer_permission(sender, instance: SystemConsumerPermission, created, **kwargs):
+@receiver(post_save, sender=ScheduleConsumerPermission)
+def add_consumer_permission(sender, instance: ScheduleConsumerPermission, created, **kwargs):
     builtins.consumer_permissions.add(instance)
 
 
-@receiver(post_delete, sender=SystemConsumerPermission)
-def delete_consumer_permission(sender, instance: SystemConsumerPermission, **kwargs):
+@receiver(post_delete, sender=ScheduleConsumerPermission)
+def delete_consumer_permission(sender, instance: ScheduleConsumerPermission, **kwargs):
     builtins.consumer_permissions.delete(instance)
 
 
