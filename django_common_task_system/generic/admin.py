@@ -97,8 +97,6 @@ class ScheduleCallbackAdmin(UserAdmin):
 
 
 class ScheduleAdmin(UserAdmin):
-    task_model = None
-    schedule_log_model = None
     queues = None
     schedule_put_name = 'user-schedule-put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
@@ -133,7 +131,7 @@ class ScheduleAdmin(UserAdmin):
 
     def admin_task(self, obj):
         return format_html('<a href="/admin/%s/%s/%s/change/">%s</a>' % (
-            obj._meta.app_label, self.task_model._meta.model_name, obj.task.id, obj.task.name
+            obj._meta.app_label, TaskModel._meta.model_name, obj.task.id, obj.task.name
         ))
 
     admin_task.short_description = '任务'

@@ -1,4 +1,4 @@
-from django_common_task_system.generic.choices import ConsumerPermissionType
+from django_common_task_system.choices import PermissionType
 
 
 class _ConsumerPermissionValidator(dict):
@@ -22,7 +22,7 @@ class BaseValidator:
         return None
 
 
-@ConsumerPermissionValidator(name=ConsumerPermissionType.IP_WHITE_LIST)
+@ConsumerPermissionValidator(name=PermissionType.IP_WHITE_LIST)
 class IPWhiteListValidator(BaseValidator):
 
     def __init__(self, config):

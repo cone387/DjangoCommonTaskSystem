@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_common_objects',
     'django_common_task_system',
-    'django_common_task_system.system_task',
+    # 'django_common_task_system.system_task',
 ]
 
 MIDDLEWARE = [

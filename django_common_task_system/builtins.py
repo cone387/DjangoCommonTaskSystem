@@ -1,53 +1,150 @@
-from django_common_task_system.generic.choices import TaskCallbackEvent, TaskCallbackStatus, TaskScheduleStatus, \
-    ScheduleQueueModule
-from django_common_task_system.models import ScheduleCallback, \
-    ScheduleConsumerPermission, ScheduleQueue, ScheduleProducer
-from django_common_task_system.generic import builtins as generic_builtins
-from django_common_task_system.generic.app import App
+import os
+from collections import OrderedDict
+from django.db import ProgrammingError, OperationalError
+from django.utils.module_loading import import_string
+from django_common_objects.models import CommonCategory
+from django_common_task_system.choices import (
+    ScheduleCallbackEvent, ScheduleCallbackStatus, ScheduleStatus, ScheduleQueueModule
+)
+from django_common_task_system.models import (
+    ScheduleCallback, ScheduleQueuePermission, ScheduleQueue, ScheduleProducer, UserModel
+)
+from django_common_task_system.permissions import ConsumerPermissionValidator
+from . import get_task_model, get_schedule_model, get_schedule_log_model, system_initialized_signal
+
+TaskModel = get_task_model()
+ScheduleModel = get_schedule_model()
+ScheduleLogModel = get_schedule_log_model()
 
 
-class BuiltinCallbacks(generic_builtins.BuiltinModels):
+class BuiltinModels(OrderedDict):
+    model = None
+    model_unique_kwargs = []
+
+    def init_object(self, obj):
+        kwargs = {
+            key: getattr(obj, key) for key in self.model_unique_kwargs
+        }
+        defaults = {
+            filed.name: getattr(obj, filed.name) for filed in obj._meta.fields if filed.name not in kwargs
+        }
+        current = self.model.objects.get_or_create(
+            defaults=defaults, **kwargs
+        )[0]
+        for field in obj._meta.fields:
+            setattr(obj, field.name, getattr(current, field.name))
+        return obj
+
+    def initialize(self):
+        for k, v in self.__dict__.items():
+            if isinstance(v, self.model):
+                obj = self.init_object(v)
+                self.add(obj, k)
+
+    def add(self, obj, key=None):
+        if key:
+            self[key] = obj
+
+    def delete(self, obj, key):
+        if key:
+            self.pop(key, None)
+
+
+class Categories(BuiltinModels):
+    model = CommonCategory
+    model_unique_kwargs = ('name',)
+
+    def __init__(self, user):
+        model = TaskModel._meta.label
+        self.system_task = self.model(
+            name='系统任务',
+            model=model,
+            user=user,
+        )
+
+        self.system_base = self.model(
+            name='系统基础',
+            model=model,
+            user=user,
+        )
+
+        self.system_test = self.model(
+            name='系统测试',
+            model=model,
+            user=user,
+        )
+        super(Categories, self).__init__()
+
+
+class ScheduleCallbacks(BuiltinModels):
     model = ScheduleCallback
     model_unique_kwargs = ['name']
 
     def __init__(self, user):
         self.http_log_upload = self.model(
             name='HTTP日志上报',
-            trigger_event=TaskCallbackEvent.DONE,
-            status=TaskCallbackStatus.ENABLE.value,
+            trigger_event=ScheduleCallbackEvent.DONE,
+            status=ScheduleCallbackStatus.ENABLE.value,
             user=user,
         )
-        super(BuiltinCallbacks, self).__init__()
+        super(ScheduleCallbacks, self).__init__()
 
 
-class BuiltinQueues(generic_builtins.BaseBuiltinQueues):
+class ScheduleQueues(BuiltinModels):
+    status_params_mapping = {
+        ScheduleStatus.OPENING.value: 'opening',
+        ScheduleStatus.CLOSED.value: 'closed',
+        ScheduleStatus.TEST.value: 'test',
+        ScheduleStatus.DONE.value: 'done',
+        ScheduleStatus.ERROR.value: 'error',
+    }
+
+    model_unique_kwargs = ['code']
     model = ScheduleQueue
 
     def __init__(self):
         self.opening = self.model(
-            code=self.status_params_mapping[TaskScheduleStatus.OPENING.value],
+            code=self.status_params_mapping[ScheduleStatus.OPENING.value],
             status=True,
-            module=ScheduleQueueModule.QUEUE.value,
+            module=ScheduleQueueModule.FIFO.value,
             name='已启用任务'
         )
         self.test = self.model(
-            code=self.status_params_mapping[TaskScheduleStatus.TEST.value],
+            code=self.status_params_mapping[ScheduleStatus.TEST.value],
             status=True,
-            module=ScheduleQueueModule.QUEUE.value,
+            module=ScheduleQueueModule.FIFO.value,
             name='测试任务'
         )
-        super(BuiltinQueues, self).__init__()
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except (ProgrammingError, OperationalError):
+            pass
+        super(ScheduleQueues, self).__init__()
+
+    def add(self, instance: ScheduleQueue, key=None):
+        if instance.status:
+            old = self.get(instance.code)
+            if not old or old.module != instance.module or old.config != instance.config:
+                instance.queue = import_string(instance.module)(**instance.config)
+                self[instance.code] = instance
+        elif not instance.status:
+            self.pop(instance.code, None)
+
+    def delete(self, instance: ScheduleQueue, key=None):
+        self.pop(instance.code, None)
 
 
-class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
+class ScheduleProducers(BuiltinModels):
     model = ScheduleProducer
+    model_unique_kwargs = ['queue']
 
-    def __init__(self, queues: BuiltinQueues):
+    def __init__(self, queues: ScheduleQueues):
         self.opening = self.model(
             queue=queues.opening,
             lte_now=True,
             filters={
-                'status': TaskScheduleStatus.OPENING.value,
+                'status': ScheduleStatus.OPENING.value,
             },
             status=True,
             name='默认'
@@ -56,28 +153,321 @@ class BuiltinProducers(generic_builtins.BaseBuiltinProducers):
             queue=queues.test,
             lte_now=True,
             filters={
-                'status': TaskScheduleStatus.TEST.value,
+                'status': ScheduleStatus.TEST.value,
             },
             status=True,
             name='测试'
         )
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except (ProgrammingError, OperationalError):
+            pass
+        super(ScheduleProducers, self).__init__()
 
-        super(BuiltinProducers, self).__init__()
+    def add(self, instance: ScheduleProducer, key=None):
+        if instance.status:
+            old = self.get(instance.id)
+            if not old or old.queue != instance.queue:
+                self[instance.id] = instance
+        elif not instance.status:
+            self.pop(instance.id, None)
+
+    def delete(self, instance: ScheduleProducer, key=None):
+        self.pop(instance.id, None)
 
 
-class BuiltinConsumerPermissions(generic_builtins.BaseConsumerPermissions):
-    model = ScheduleConsumerPermission
-
-
-class Builtins(generic_builtins.BaseBuiltins):
-    app = App.user_task
+class ScheduleQueuePermissions(BuiltinModels):
+    model = ScheduleQueuePermission
+    model_unique_kwargs = ['queue', 'type']
 
     def __init__(self):
-        super(Builtins, self).__init__()
-        self.queues = BuiltinQueues()
-        self.callbacks = BuiltinCallbacks(self.user)
-        self.producers = BuiltinProducers(self.queues)
-        self.consumer_permissions = BuiltinConsumerPermissions()
+        super(ScheduleQueuePermissions, self).__init__()
+        try:
+            for m in self.model.objects.filter(status=True):
+                self.add(m)
+        except (ProgrammingError, OperationalError):
+            pass
+
+    def add(self, instance: ScheduleQueuePermission, key=None):
+        if instance.status:
+            old = self.get(instance.queue.code)
+            if not old or old.type != instance.type or old.config != instance.config:
+                validator = ConsumerPermissionValidator.get(instance.type)
+                if validator:
+                    self[instance.queue.code] = validator(instance.config)
+        elif not instance.status:
+            self.pop(instance.queue.code, None)
+
+    def delete(self, instance: ScheduleQueuePermission, key=None):
+        self.pop(instance.queue.code, None)
+
+
+class Tasks(BuiltinModels):
+    model = TaskModel
+    model_unique_kwargs = ['name', 'parent', 'category']
+
+    def __init__(self, categories: Categories, queues):
+        user = categories.system_task.user
+
+        self.shell_execution = self.model(
+            name='Shell执行',
+            user=user,
+            category=categories.system_base,
+            config={
+                'required_fields': ['script'],
+            }
+        )
+        self.sql_execution = self.model(
+            name='SQL执行',
+            user=user,
+            category=categories.system_base,
+            config={
+                'required_fields': ['script'],
+            }
+        )
+
+        self.sql_produce = self.model(
+            name='SQL生产',
+            user=user,
+            category=categories.system_base,
+            config={
+                'required_fields': ['script', 'queue'],
+            }
+        )
+
+        self.strict_schedule_handle = self.model(
+            name='严格模式计划处理',
+            user=user,
+            category=categories.system_task,
+        )
+
+        self.custom_program = self.model(
+            name='自定义程序',
+            user=user,
+            category=categories.system_base,
+            config={
+                'required_fields': ['custom_program']
+            }
+        )
+
+        interval = 1
+        unit = 'month'
+        self.log_clean = self.model(
+            name='日志清理',
+            parent=self.sql_execution,
+            category=categories.system_task,
+            user=user,
+            config={
+                'script': 'delete from %s where create_time < date_sub(now(), interval %s %s);' %
+                       (ScheduleLogModel._meta.db_table, interval, unit)
+            },
+        )
+
+        max_retry_times = 5
+        self.exception_handle = self.model(
+            name='异常处理',
+            user=user,
+            category=categories.system_task,
+            config={
+                'max_retry_times': max_retry_times,
+            },
+        )
+        self.test_sql_execution = self.model(
+            name='测试SQL执行任务',
+            parent=self.sql_execution,
+            category=categories.system_test,
+            config={
+                'script': 'select * from %s limit 10;' % ScheduleLogModel._meta.db_table
+            },
+            user=user
+        )
+
+        self.test_sql_produce = self.model(
+            name='测试SQL生产任务',
+            parent=self.sql_produce,
+            category=categories.system_test,
+            config={
+                'script': 'select * from %s limit 10;' % ScheduleLogModel._meta.db_table,
+                'queue': queues.test.code
+            },
+            user=user
+        )
+        self.test_shell_execution = self.model(
+            name='测试Shell执行任务',
+            parent=self.shell_execution,
+            category=categories.system_test,
+            config={
+                'script': 'echo "hello world"'
+            },
+            user=user
+        )
+
+        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/custom_programs'))
+        self.test_python_custom_program = self.model(
+            name='测试自定义Python程序执行任务',
+            parent=self.custom_program,
+            category=categories.system_test,
+            user=user,
+            config={
+                'custom_program': {
+                    'executable': os.path.join(executable_path, 'python_test.py')
+                }
+            }
+        )
+        self.test_shell_custom_program = self.model(
+            name='测试自定义Shell程序执行任务',
+            parent=self.custom_program,
+            category=categories.system_test,
+            user=user,
+            config={
+                'custom_program': {
+                    'executable': os.path.join(executable_path, 'shell_test.sh')
+                }
+            }
+        )
+        self.test_zip_execute_program = self.model(
+            name='测试自定义zip程序执行任务',
+            parent=self.custom_program,
+            category=categories.system_test,
+            user=user,
+            config={
+                'custom_program': {
+                    'executable': os.path.join(executable_path, 'zip_test.zip')
+                }
+            }
+        )
+        super(Tasks, self).__init__()
+
+
+class Schedules(BuiltinModels):
+    model_unique_kwargs = ['task', 'user']
+    model = ScheduleModel
+
+    def __init__(self, user, tasks: Tasks):
+        self.log_clean = self.model(
+            task=tasks.log_clean,
+            user=user,
+            config={
+                "T": {
+                    "DAY": {
+                        "period": 1
+                    },
+                    "time": "01:00:00",
+                    "type": "DAY"
+                },
+                "base_on_now": True,
+                "schedule_type": "T"
+            }
+        )
+
+        self.exception_handle = self.model(
+            task=tasks.exception_handle,
+            user=user,
+            config={
+                "S": {
+                    "period": 60,
+                    "schedule_start_time": "2023-04-04 15:31:00"
+                },
+                "base_on_now": True,
+                "schedule_type": "S"
+            }
+        )
+
+        config = {
+            "S": {
+                "period": 60,
+                "schedule_start_time": "2023-04-04 15:31:00"
+            },
+            "base_on_now": True,
+            "schedule_type": "S"
+        }
+
+        self.test_sql_execution = self.model(
+            task=tasks.test_sql_execution,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_sql_produce = self.model(
+            task=tasks.test_sql_produce,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_shell_execution = self.model(
+            task=tasks.test_shell_execution,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_python_custom_program = self.model(
+            task=tasks.test_python_custom_program,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_shell_custom_program = self.model(
+            task=tasks.test_shell_custom_program,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+        self.test_zip_execute_program = self.model(
+            task=tasks.test_zip_execute_program,
+            user=user,
+            status=ScheduleStatus.TEST.value,
+            config=config
+        )
+
+        self.strict_schedule_handle = self.model(
+            task=tasks.strict_schedule_handle,
+            user=user,
+            status=ScheduleStatus.OPENING.value,
+            config={
+                "S": {
+                    "period": 60 * 60,
+                    "schedule_start_time": "2023-04-04 15:31:00"
+                },
+                "base_on_now": True,
+                "schedule_type": "S"
+            }
+        )
+
+        super(Schedules, self).__init__()
+
+
+class Builtins:
+
+    def __init__(self):
+        self._initialized = False
+        self.user = UserModel(username='系统', is_superuser=True)
+        self.categories = Categories(self.user)
+        self.schedule_queues = ScheduleQueues()
+        self.schedule_callbacks = ScheduleCallbacks(self.user)
+        self.schedule_producers = ScheduleProducers(self.schedule_queues)
+        self.tasks = Tasks(self.categories, self.schedule_queues)
+        self.schedules = Schedules(self.user, self.tasks)
+        self.schedule_queue_permissions = ScheduleQueuePermissions()
+
+    def init_user(self):
+        user = UserModel.objects.filter(is_superuser=True).order_by('id').first()
+        if not user:
+            raise Exception('请先创建超级用户')
+        for field in user._meta.fields:
+            setattr(self.user, field.name, getattr(user, field.name))
+
+    def initialize(self):
+        if not self._initialized:
+            self._initialized = True
+            if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
+                print('初始化内置任务...')
+                self.init_user()
+                for i in self.__dict__.values():
+                    if isinstance(i, BuiltinModels):
+                        i.initialize()
+                from threading import Timer
+                Timer(2, function=system_initialized_signal.send, args=('system_initialized', )).start()
 
 
 builtins = Builtins()
