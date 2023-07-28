@@ -9,7 +9,7 @@ from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
 from datetime import datetime, timezone
 from django.core.validators import ValidationError
-from django_common_task_system.schedule_config import ScheduleConfig
+from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django.db.models.signals import post_save
 from django.utils import timezone
@@ -96,11 +96,13 @@ class Schedule(models.Model):
     status = common_fields.CharField(default=ScheduleStatus.OPENING.value, verbose_name='状态',
                                      choices=ScheduleStatus.choices)
     is_strict = models.BooleanField(default=False, verbose_name='严格模式')
-    callback = models.ForeignKey(ScheduleCallback, on_delete=models.CASCADE,
+    callback = models.ForeignKey(ScheduleCallback, on_delete=models.SET_NULL,
                                  null=True, blank=True, db_constraint=False, verbose_name='回调')
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
-    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    # 这里的update_time不能使用auto_now，因为每次next_schedule_time更新时，都会更新update_time,
+    # 这样会导致每次更新都会触发post_save且不知道啥时候更新了调度计划
+    update_time = models.DateTimeField(verbose_name='更新时间')
 
     def generate_next_schedule(self):
         try:
@@ -235,77 +237,82 @@ class ExceptionReport(models.Model):
     __repr__ = __str__
 
 
-class TaskClientManager(models.Manager, dict):
+class QuerySet(list):
+    class Query:
+        order_by = []
+        select_related = False
 
-    class QuerySet(list):
-        class Query:
-            order_by = []
-            select_related = False
+    def __init__(self, seq, model):
+        super().__init__(seq)
+        self.query = self.Query
+        self.model = model
+        self.verbose_name = model._meta.verbose_name
+        self.verbose_name_plural = model._meta.verbose_name_plural
 
-        def __init__(self, seq):
-            super().__init__(seq)
-            self.verbose_name = 'TaskClient'
-            self.verbose_name_plural = 'TaskClient'
-            self.query = self.Query
-            self.model = TaskClient
+    def filter(self, **kwargs) -> 'QuerySet':
+        queryset = self
+        for k, v in kwargs.items():
+            try:
+                column, op = k.split('__')
+            except ValueError:
+                column, op = k, 'exact'
+            if op == 'in':
+                queryset = self.__class__([x for x in queryset if getattr(x, column, '') in v], self.model)
+            elif op == 'exact':
+                queryset = self.__class__([x for x in queryset if getattr(x, column, '') == v], self.model)
+        return queryset
 
-        def filter(self, pk__in=None, **kwargs) -> 'TaskClientManager.QuerySet':
-            if pk__in:
-                return self.__class__(x for x in self if str(x.pk) in pk__in)
-            queryset = self
-            for k, v in kwargs.items():
-                try:
-                    column, op = k.split('__')
-                except ValueError:
-                    column, op = k, 'exact'
-                if op == 'in':
-                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') in v)
-                elif op == 'exact':
-                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') == v)
-            return queryset
-
-        def order_by(self, *args) -> 'TaskClientManager.QuerySet':
-            def custom_sort(x, y):
-                for arg in args:
-                    if arg.startswith('-'):
-                        arg = arg[1:]
-                        reverse = True
-                    else:
-                        reverse = False
-                    if getattr(x, arg) > getattr(y, arg):
-                        return -1 if reverse else 1
-                    elif getattr(x, arg) < getattr(y, arg):
-                        return 1 if reverse else -1
-                return 0
-            self.sort(key=cmp_to_key(custom_sort))
-            return self
-
-        def count(self, value=None) -> int:
-            return len(self)
-
-        def delete(self):
-            for x in self:
-                x.delete()
-
-        def get(self, **kwargs) -> 'TaskClient':
-            for x in self:
-                for k, v in kwargs.items():
-                    if getattr(x, k) != v:
-                        break
+    def order_by(self, *args) -> 'QuerySet':
+        def custom_sort(x, y):
+            for arg in args:
+                if arg.startswith('-'):
+                    arg = arg[1:]
+                    reverse = True
                 else:
-                    return x
-            raise TaskClient.DoesNotExist
+                    reverse = False
+                if getattr(x, arg) > getattr(y, arg):
+                    return -1 if reverse else 1
+                elif getattr(x, arg) < getattr(y, arg):
+                    return 1 if reverse else -1
+            return 0
+        self.sort(key=cmp_to_key(custom_sort))
+        return self
 
-        def _clone(self):
-            return self
+    def select_related(self, *args) -> 'QuerySet':
+        return self
+
+    def count(self, value=None) -> int:
+        return len(self)
+
+    def delete(self):
+        for x in self:
+            x.delete()
+
+    def get(self, **kwargs):
+        for x in self:
+            for k, v in kwargs.items():
+                if getattr(x, k) != v:
+                    break
+            else:
+                return x
+        raise TaskClient.DoesNotExist
+
+    def _clone(self):
+        return self
+
+
+class CustomManager(models.Manager, dict):
 
     def all(self):
-        return self.QuerySet(dict.values(self))
+        return QuerySet(dict.values(self), self.model)
 
-    def get(self, client_id, default=None) -> 'TaskClient':
-        return dict.get(self, client_id, default)
+    def get_queryset(self):
+        return self.all()
 
-    def filter(self, **kwargs) -> 'TaskClientManager.QuerySet':
+    def get(self, pk, default=None):
+        return dict.get(self, pk, default)
+
+    def filter(self, **kwargs) -> 'QuerySet':
         return self.all().filter(**kwargs)
 
     def __get__(self, instance, owner):
@@ -334,7 +341,7 @@ class TaskClient(models.Model):
 
     settings_module = {}
 
-    objects = TaskClientManager()
+    objects = CustomManager()
 
     class Meta:
         managed = False
@@ -389,83 +396,41 @@ class TaskClient(models.Model):
         TaskClient.objects.pop(self.client_id)
 
 
-class MissingScheduleManager(models.Manager):
-    class QuerySet(list):
-        class Query:
-            order_by = []
-            select_related = False
+from enum import StrEnum
 
-        def __init__(self, seq):
-            super().__init__(seq)
-            self.verbose_name = '遗漏计划'
-            self.verbose_name_plural = '遗漏计划'
-            self.query = self.Query
-            self.model = TaskClient
 
-        def filter(self, **kwargs) -> 'MissingScheduleManager.QuerySet':
-            queryset = self
-            for k, v in kwargs.items():
-                try:
-                    column, op = k.split('__')
-                except ValueError:
-                    column, op = k, 'exact'
-                if op == 'in':
-                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') in v)
-                elif op == 'exact':
-                    queryset = self.__class__(x for x in queryset if getattr(x, column, '') == v)
-            return queryset
+class MissingReason(StrEnum):
+    SCHEDULE_EXCEPTION = 'SCHEDULE_EXCEPTION'
+    EXCEED_MAX_RETRY_TIMES = 'EXCEED_MAX_RETRY_TIMES'
 
-        def order_by(self, *args) -> 'TaskClientManager.QuerySet':
-            def custom_sort(x, y):
-                for arg in args:
-                    if arg.startswith('-'):
-                        arg = arg[1:]
-                        reverse = True
-                    else:
-                        reverse = False
-                    if getattr(x, arg) > getattr(y, arg):
-                        return -1 if reverse else 1
-                    elif getattr(x, arg) < getattr(y, arg):
-                        return 1 if reverse else -1
-                return 0
 
-            self.sort(key=cmp_to_key(custom_sort))
-            return self
-
-        def count(self, value=None) -> int:
-            return len(self)
-
-        def delete(self):
-            for x in self:
-                x.delete()
-
-        def get(self, **kwargs) -> 'TaskClient':
-            for x in self:
-                for k, v in kwargs.items():
-                    if getattr(x, k) != v:
-                        break
-                else:
-                    return x
-            raise TaskClient.DoesNotExist
-
-        def _clone(self):
-            return self
+class MissingScheduleManager(CustomManager):
 
     def all(self):
-        return self.QuerySet(dict.values(self))
-
-    def get(self, client_id, default=None) -> 'TaskClient':
-        return dict.get(self, client_id, default)
-
-    def filter(self, **kwargs) -> 'TaskClientManager.QuerySet':
-        return self.all().filter(**kwargs)
-
-    def __get__(self, instance, owner):
-        return self._meta.managers_map[self.manager.name]
+        schedules = []
+        for x in dict.values(self):
+            schedules.extend(x)
+        return QuerySet(schedules, self.model)
 
 
 class MissingSchedule(Schedule):
 
+    reason: MissingReason = None
+
+    objects = MissingScheduleManager()
+
     class Meta:
         managed = False
+        verbose_name = verbose_name_plural = '缺失调度'
 
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        schedules = MissingSchedule.objects.setdefault(self.pk, [])
+        schedules.append(self)
+
+    def delete(self, using=None, keep_parents=False):
+        schedules = MissingSchedule.objects.get(self.pk)
+        schedules.remove(self)
+        if not schedules:
+            MissingSchedule.objects.pop(self.pk)

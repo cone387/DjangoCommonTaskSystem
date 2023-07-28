@@ -1,6 +1,6 @@
 from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
-from django_common_task_system.generic.choices import TaskClientStatus
+from django_common_task_system.choices import TaskClientStatus
 from docker.errors import APIError
 import os
 import subprocess

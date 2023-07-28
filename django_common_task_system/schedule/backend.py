@@ -1,11 +1,11 @@
 from django.conf import settings
-from .choices import ScheduleStatus
-from .schedule_config import ScheduleConfig
+from django_common_task_system.choices import ScheduleStatus
+from django_common_task_system.builtins import builtins
+from .config import ScheduleConfig
 from threading import Thread, Event
 from datetime import datetime
 import time
 import traceback
-from .builtins import builtins
 
 
 class TaskScheduleThread(Thread):
@@ -56,4 +56,3 @@ class TaskScheduleThread(Thread):
             except Exception as err:
                 traceback.print_exc()
             time.sleep(SCHEDULE_INTERVAL)
-

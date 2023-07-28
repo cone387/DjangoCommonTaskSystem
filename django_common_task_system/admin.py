@@ -16,9 +16,32 @@ from .choices import ScheduleType, ScheduleQueueModule, PermissionType, Schedule
 
 
 UserModel = models.UserModel
-TaskModel = get_task_model()
-ScheduleModel = get_schedule_model()
-ScheduleLogModel = get_schedule_log_model()
+TaskModel: models.Task = get_task_model()
+ScheduleModel: models.Schedule = get_schedule_model()
+ScheduleLogModel: models.ScheduleLog = get_schedule_log_model()
+from django.db.models import Exists, OuterRef, Q
+
+
+class TaskParentFilter(admin.SimpleListFilter):
+
+    title = '父任务'
+    parameter_name = 'parent'
+    other = ('-1', '其它')
+
+    def lookups(self, request, model_admin):
+        parent_tasks_with_children = TaskModel.objects.annotate(
+            has_children=Exists(TaskModel.objects.filter(parent=OuterRef('id')))).filter(has_children=True)
+        lookups = [(task.id, task.name) for task in parent_tasks_with_children]
+        lookups.append(self.other)
+        return lookups
+
+    def queryset(self, request, queryset):
+        value = self.value()
+        if value == self.other[0]:
+            queryset = queryset.filter(~Q(parent__id__in=[choice[0] for choice in self.lookup_choices]))
+        elif value:
+            queryset = queryset.filter(parent_id=value)
+        return queryset
 
 
 class BaseAdmin(admin.ModelAdmin):
@@ -29,8 +52,7 @@ class BaseAdmin(admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def save_form(self, request, form, change):
-        if form.instance.user_id and form.instance.user_id != request.user.id:
-            form.instance.user = request.user
+        form.instance.user = request.user
         return super().save_form(request, form, change)
 
 
@@ -47,7 +69,7 @@ class TaskAdmin(BaseAdmin):
         'description',
     )
     form = forms.TaskForm
-    list_filter = ('category', 'tags', 'parent')
+    list_filter = ('category', 'tags', TaskParentFilter)
     filter_horizontal = ('tags',)
 
     def __init__(self, *args, **kwargs):
@@ -95,6 +117,9 @@ class TaskAdmin(BaseAdmin):
             'common_task_system/js/task_type_admin.js',
         )
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('parent', 'category')
+
 
 class ScheduleCallbackAdmin(BaseAdmin):
     list_display = ('id', 'name', 'status', 'user', 'update_time')
@@ -114,11 +139,12 @@ class ScheduleAdmin(BaseAdmin):
     change_list_template = ['admin/system_schedule/change_list.html']
     # readonly_fields = ("next_schedule_time", )
     form = forms.ScheduleForm
+    list_filter = ('status', 'is_strict', 'task__category')
 
     fields = (
         ("task", "status"),
         "nlp_sentence",
-        ("schedule_type", 'priority', 'base_on_now', 'strict_mode'),
+        ("schedule_type", 'priority', 'base_on_now', 'is_strict'),
         "period_schedule",
         "once_schedule",
         "crontab",
@@ -134,8 +160,8 @@ class ScheduleAdmin(BaseAdmin):
         'config',
     )
 
-    def strict(self, obj):
-        return '是' if obj.strict_mode else '否'
+    def strict(self, obj: ScheduleModel):
+        return '是' if obj.is_strict else '否'
     strict.boolean = False
     strict.short_description = '严格模式'
 
@@ -249,9 +275,11 @@ class ScheduleLogAdmin(admin.ModelAdmin):
         return format_html(
             '<a href="%s" target="_blank">重试</a>' % url
         )
-
     retry.allow_tags = True
     retry.short_description = '重试'
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('schedule', 'schedule__task')
 
 
 class ScheduleQueueAdmin(admin.ModelAdmin):
@@ -438,8 +466,15 @@ class TaskClientAdmin(admin.ModelAdmin):
         return False
 
 
+class MissingScheduleAdmin(ScheduleAdmin):
+
+    def get_queryset(self, request):
+        return super(MissingScheduleAdmin, self).get_queryset(request)
+    
+
 admin.site.register(TaskModel, TaskAdmin)
 admin.site.register(ScheduleModel, ScheduleAdmin)
+admin.site.register(models.MissingSchedule, MissingScheduleAdmin)
 admin.site.register(models.ScheduleCallback, ScheduleCallbackAdmin)
 admin.site.register(ScheduleLogModel, ScheduleLogAdmin)
 admin.site.register(models.ScheduleQueue, ScheduleQueueAdmin)

@@ -11,7 +11,7 @@ from django_common_task_system.choices import (
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
-from .schedule_config import ScheduleConfig
+from .schedule.config import ScheduleConfig
 from django.urls import reverse
 from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
@@ -231,14 +231,10 @@ class ScheduleForm(forms.ModelForm):
             start_time=cleaned_data.get('schedule_start_time', None)
         )
         base_on_now = cleaned_data.get('base_on_now', False)
-        strict_mode = cleaned_data.get('strict_mode', False)
-        if strict_mode and base_on_now:
+        is_strict = cleaned_data.get('is_strict', False)
+        if is_strict and base_on_now:
             raise forms.ValidationError("严格模式下不允许基于当前时间")
-        if self.instance.id:
-            if self.instance.config != schedule.config:
-                schedule.config['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            schedule.config['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.instance.update_time = datetime.now()
         return cleaned_data
 
     class Meta:

@@ -81,8 +81,8 @@ class ScheduleCallbacks(BuiltinModels):
     model_unique_kwargs = ['name']
 
     def __init__(self, user):
-        self.http_log_upload = self.model(
-            name='HTTP日志上报',
+        self.log_upload = self.model(
+            name='日志上报',
             trigger_event=ScheduleCallbackEvent.DONE,
             status=ScheduleCallbackStatus.ENABLE.value,
             user=user,

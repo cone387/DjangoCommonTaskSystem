@@ -25,7 +25,7 @@ class TaskSerializer(serializers.ModelSerializer):
 class QueueTaskSerializer(TaskSerializer):
     tags = None
 
-    class Meta:
+    class Meta(TaskSerializer.Meta):
         exclude = ('user', 'update_time', 'description', 'create_time')
 
 
@@ -33,7 +33,7 @@ class ScheduleCallbackSerializer(serializers.ModelSerializer):
 
     class Meta:
         exclude = ('update_time', )
-        models = models.ScheduleCallback
+        model = models.ScheduleCallback
 
 
 class ScheduleSerializer(serializers.ModelSerializer):
@@ -65,7 +65,7 @@ class QueueScheduleSerializer(ScheduleSerializer):
     def get_queue(obj):
         return getattr(obj, 'queue')
 
-    class Meta:
+    class Meta(ScheduleSerializer.Meta):
         # fields = ('id', 'task', 'schedule_time', 'update_time', 'callback', 'user')
         exclude = ('priority', 'create_time', 'next_schedule_time', 'schedule_start_time',
                    'schedule_end_time', 'status', 'config')

@@ -1,6 +1,7 @@
 from datetime import datetime
 from queue import Empty
 from threading import Thread
+from django.db import connection
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.views.decorators.csrf import csrf_exempt
@@ -16,12 +17,15 @@ from django_common_task_system.utils.schedule_time import nlp_config_to_schedule
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from rest_framework.request import Request
 from django.http.response import JsonResponse, HttpResponse
+from django_common_task_system.schedule import util as schedule_util
 from .choices import TaskClientStatus, ScheduleStatus
 from .client import start_client
 from .models import TaskClient
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
-from . import models, system_initialized_signal, schedule_backend
+from . import models, system_initialized_signal
+from .schedule import backend as schedule_backend
+import os
 
 
 UserModel = models.UserModel
@@ -74,6 +78,17 @@ def on_system_shutdown(signum, frame):
     print('system shutdown, signal: %s' % signum)
     for client in models.TaskClient.objects.all():
         client.delete()
+
+
+@receiver(post_delete, sender=TaskModel)
+def delete_task(sender, instance: TaskModel, **kwargs):
+    if instance.config:
+        f = instance.config.get('executable_file')
+        if f and os.path.exists(f):
+            os.remove(f)
+            path = os.path.abspath(os.path.join(f, '../'))
+            if not len(os.listdir(path)):
+                os.rmdir(path)
 
 
 @receiver(post_save, sender=models.TaskClient)
@@ -152,7 +167,7 @@ class ScheduleAPI:
 
     @staticmethod
     @csrf_exempt
-    def put(self, request: Request):
+    def put(request: Request):
         schedule_ids = request.GET.get('i', None) or request.POST.get('i', None)
         queues = request.GET.get('q', None) or request.POST.get('q', None)
         schedule_times = request.GET.get('t', None) or request.POST.get('t', None)
@@ -181,7 +196,7 @@ class ScheduleAPI:
             schedule_mapping = {x.id: x for x in schedules}
             result = {}
             for i, q, t in zip(schedule_ids, queues, schedule_times):
-                queue_instance = self.queues.get(q, None)
+                queue_instance = builtins.schedule_queues.get(q, None)
                 if queue_instance is None:
                     result[q] = 'no such queue: %s' % q
                     continue
@@ -213,99 +228,54 @@ class ScheduleAPI:
             schedules = ScheduleModel.objects.filter(id=schedule_id, status=ScheduleStatus.OPENING.value)
         else:
             schedules = ScheduleModel.objects.filter(is_strict=is_strict, status=ScheduleStatus.OPENING.value)
+        missing_result = schedule_util.get_missing_schedules(schedules)
+        missing = []
+        for pk, target in missing_result.items():
+            missing.extend(target)
+        return JsonResponse(ScheduleSerializer(missing, many=True).data)
 
-        schedule_start_time = request.GET.get('start_time', None)
-        schedule_end_date = request.GET.get('end_time', None)
-        result = {}
-        errors = {'producer_not_found': [], 'schedule_time_diff': [], 'schedule_interval': []}
-        producer_not_found_errors = errors['producer_not_found']
-        schedule_time_diff_errors = errors['schedule_time_diff']
-        schedule_interval_errors = errors['schedule_interval']
 
-        for schedule in schedules:
-            schedule.config['base_on_now'] = False
-            schedule_times = get_schedule_times(schedule, start_date=schedule_start_time, end_date=schedule_end_date)
-            diffs = set()
-            if len(schedule_times) < 2:
-                info = "%s schedule times is less than 2, ignored" % schedule
-                result[schedule.id] = info
-                continue
-            for i in range(len(schedule_times) - 1):
-                a = schedule_times[i]
-                b = schedule_times[i + 1]
-                diff = b - a
-                seconds = int(diff.total_seconds())
-                diffs.add(seconds)
-            if len(diffs) != 1:
-                schedule_time_diff_errors.append(diffs)
-                continue
-            diff = diffs.pop()
-            if diff % (3600 * 24) == 0:
-                dimension = 'DAY'
-                interval = diff // (3600 * 24)
-            elif diff % 3600 == 0:
-                dimension = 'HOUR'
-                interval = diff // 3600
-            elif diff % 60 == 0:
-                dimension = 'MINUTE'
-                interval = diff // 60
+
+class ScheduleProduceView(APIView):
+
+    def post(self, request: Request, pk: int):
+        try:
+            schedule = ScheduleModel.objects.select_related('task').get(id=pk)
+        except ScheduleModel.DoesNotExist:
+            return Response({'message': 'schedule_id(%s)不存在' % pk}, status=status.HTTP_404_NOT_FOUND)
+        sql: str = schedule.task.config.get('script', '').strip()
+        if not sql:
+            return Response({'message': 'sql语句不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        if not sql.startswith('select'):
+            return Response({'message': 'sql语句必须以select开头'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            queue = builtins.queues[schedule.task.config['queue']].queue
+            max_size = schedule.task.config.get('max_size', 10000)
+            if queue.qsize() > max_size:
+                return Response({'message': '队列(%s)已满(%s)' % (schedule.task.config['queue'], max_size)},
+                                status=status.HTTP_400_BAD_REQUEST)
+            schedule.task.name = schedule.task.name + "-生产的任务"
+            if schedule.task.config.get('include_meta'):
+                def produce(item):
+                    schedule.task.config['content'] = item
+                    queue.put(serializers.QueueScheduleSerializer(schedule).data)
             else:
-                schedule_interval_errors.append("%s: %s" % (strict_schedule.id, diff))
-                continue
-            max_failed_times = self.schedule.task.config.get('max_failed_times', 3)
-            start_date, end_date = schedule_times[0], schedule_times[-1]
-            lens = len(schedule_times)
-            # 这里batch=700是因为mysql.help_topic表的最大id是699，也就是700条数据
-            batch = 700
-            schedule_date_commands = []
-            for i, x in enumerate(range(0, lens, batch)):
-                b = x + batch - 1 if x + batch - 1 < lens else lens - 1
-                st, et = schedule_times[x], schedule_times[b]
-                schedule_date_commands.append(f"""
-                            SELECT
-                            date_add('{st}', INTERVAL + t{i}.help_topic_id * {interval} {dimension} ) AS date 
-                        FROM
-                            mysql.help_topic t{i} 
-                        WHERE
-                            t{i}.help_topic_id <= timestampdiff({dimension}, '{st}', '{et}') 
-                        """)
-            schedule_date_command = ' union all '.join(schedule_date_commands)
-            command = f"""
-                        select a.date from ({schedule_date_command}) a 
-                        left join (
-                            select schedule_time, count(status != 'F' or null) as succeed, 
-                                count(status='F' or null) as failed from {schedule_log_model._meta.db_table} where 
-                                schedule_id = {strict_schedule.id} and 
-                                schedule_time between '{start_date}' and '{end_date}'
-                                group by schedule_time
-                        ) b 
-                        on a.date = b.schedule_time where b.succeed is null or (b.succeed = 0 and b.failed < {max_failed_times})
-                    """
-            missing_datetimes = []
-            time = strict_schedule.config[strict_schedule.config['schedule_type']].get('time', '03:00:00')
+                def produce(item):
+                    item['task_name'] = schedule.task.name
+                    queue.put(item)
             with connection.cursor() as cursor:
-                cursor.execute(command)
-                for d, *_ in cursor.fetchall():
-                    # 根据日志查出来的遗漏日期就是实际的日期，不需要根据latest_days来计算
-                    if len(d) == 10:
-                        d = d + ' ' + time
-                    missing_datetimes.append(d)
-            if missing_datetimes:
-                logger.info("%s missing times: %s" % (strict_schedule, len(missing_datetimes)))
-                url = urljoin(settings.HOST, reverse(handle_url_name))
-                result[strict_schedule.id] = put_schedule(url, strict_schedule, queue, missing_datetimes)
-            else:
-                logger.info("%s no missing times" % strict_schedule)
-        for k, v in errors.items():
-            if v:
-                break
-        else:
-            # no error
-            if not result:
-                raise EmptyResult("no strict schedule need to be executed")
-            return result
-        result['errors'] = errors
-        raise ValueError(result)
+                cursor.execute(sql)
+                rows = cursor.fetchall()
+                col_names = [desc[0] for desc in cursor.description]
+                nums = len(rows)
+                for row in rows:
+                    obj = {}
+                    for index, value in enumerate(row):
+                        obj[col_names[index]] = value
+                    produce(obj)
+        except Exception as e:
+            return Response({'message': 'sql语句执行失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': '成功产生%s条数据' % nums, 'nums': nums})
 
 
 class ScheduleTimeParseView(APIView):
@@ -340,7 +310,7 @@ class TaskClientView:
 
     @staticmethod
     def stop_process(request: Request, client_id: int):
-        client = TaskClient.objects.get(client_id=client_id)
+        client = TaskClient.objects.get(pk=client_id)
         if client is None:
             return HttpResponse('TaskClient(%s)不存在' % client_id)
         try:

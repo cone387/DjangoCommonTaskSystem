@@ -3,7 +3,7 @@ from jionlp_time import parse_time
 from django_common_task_system.utils.schedule_time import nlp_config_to_schedule_config
 from datetime import datetime, timedelta
 from django.core.validators import ValidationError
-from django_common_task_system.generic.choices import ScheduleTimingType, ScheduleType
+from django_common_task_system.choices import ScheduleTimingType, ScheduleType
 
 
 mdays = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
@@ -309,4 +309,3 @@ class ScheduleConfig:
         else:
             raise ValidationError("unsupported schedule type: %s" % schedule_type)
         return next_time
-
