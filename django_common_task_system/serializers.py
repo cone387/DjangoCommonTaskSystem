@@ -39,6 +39,7 @@ class ScheduleCallbackSerializer(serializers.ModelSerializer):
 class ScheduleSerializer(serializers.ModelSerializer):
     task = TaskSerializer()
     callback = ScheduleCallbackSerializer()
+    schedule_time = serializers.DateTimeField(source="next_schedule_time")
 
     class Meta:
         exclude = ('update_time', )
@@ -48,7 +49,6 @@ class ScheduleSerializer(serializers.ModelSerializer):
 class QueueScheduleSerializer(ScheduleSerializer):
     task = QueueTaskSerializer()
     callback = ScheduleCallbackSerializer()
-    schedule_time = serializers.DateTimeField(source="next_schedule_time")
     generator = serializers.SerializerMethodField()
     last_log = serializers.SerializerMethodField()
     queue = serializers.SerializerMethodField()
@@ -72,7 +72,7 @@ class QueueScheduleSerializer(ScheduleSerializer):
 
 
 class ScheduleLogSerializer(serializers.ModelSerializer):
-    schedule = serializers.PrimaryKeyRelatedField(queryset=ScheduleLogModel.objects.all())
+    schedule = serializers.PrimaryKeyRelatedField(queryset=ScheduleModel.objects.all())
 
     class Meta:
         fields = '__all__'

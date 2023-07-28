@@ -73,3 +73,12 @@ class ContainerStatus(TextChoices):
     EXITED = 'Exited'
 
 
+class ExecuteStatus(TextChoices):
+    INIT = 'I'
+    RUNNING = 'R'
+    SUCCEED = 'S'
+    EMPTY = 'E'
+    ERROR_BUT_NO_RETRY = 'N'
+    FAILED = 'F'
+    DONE = 'D'
+    TIMEOUT = 'T'

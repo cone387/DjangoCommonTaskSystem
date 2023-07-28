@@ -282,7 +282,7 @@ class ScheduleLogAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related('schedule', 'schedule__task')
 
 
-class ScheduleQueueAdmin(admin.ModelAdmin):
+class ScheduleQueueAdmin(BaseAdmin):
     form = forms.ScheduleQueueForm
     schedule_get_name = 'schedule-get'
     list_display = ('id', 'name', 'code', 'queue_url', 'module', 'status', 'queue_size', 'update_time')
@@ -310,7 +310,7 @@ class ScheduleQueueAdmin(admin.ModelAdmin):
     queue_url.short_description = '队列地址'
 
 
-class ScheduleProducerAdmin(admin.ModelAdmin):
+class ScheduleProducerAdmin(BaseAdmin):
     form = forms.ScheduleProducerForm
     schedule_get_name = 'schedule-get'
     list_display = ('id', 'name', 'producer_queue', 'consumer_url', 'task_num', 'status', 'update_time')
@@ -347,7 +347,7 @@ class ScheduleProducerAdmin(admin.ModelAdmin):
     task_num.short_description = '任务数量'
 
 
-class ScheduleQueuePermissionAdmin(admin.ModelAdmin):
+class ScheduleQueuePermissionAdmin(BaseAdmin):
     list_display = ('id', 'queue', 'type', 'summary', 'status', 'update_time')
     form = forms.ConsumerPermissionForm
     fields = (
@@ -466,10 +466,14 @@ class TaskClientAdmin(admin.ModelAdmin):
         return False
 
 
-class MissingScheduleAdmin(ScheduleAdmin):
+class MissingScheduleAdmin(admin.ModelAdmin):
+    list_display = ('schedule', 'reason')
 
     def get_queryset(self, request):
         return super(MissingScheduleAdmin, self).get_queryset(request)
+
+    def get_deleted_objects(self, objs, request):
+        return super(MissingScheduleAdmin, self).get_deleted_objects(objs, request)
     
 
 admin.site.register(TaskModel, TaskAdmin)

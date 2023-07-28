@@ -33,7 +33,7 @@ if not hasattr(settings, 'SCHEDULE_LOG_MODEL'):
     setattr(settings, 'SCHEDULE_LOG_MODEL', 'django_common_task_system.ScheduleLog')
 
 if not hasattr(settings, 'SCHEDULE_SERIALIZER'):
-    setattr(settings, 'SCHEDULE_SERIALIZER', 'django_common_task_system.serializers.ScheduleSerializer')
+    setattr(settings, 'SCHEDULE_SERIALIZER', 'django_common_task_system.serializers.QueueScheduleSerializer')
 
 
 def get_task_model():

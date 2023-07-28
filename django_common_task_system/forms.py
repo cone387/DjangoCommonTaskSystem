@@ -17,6 +17,7 @@ from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
 from django_common_task_system.utils.cache import ttl_cache
 from . import models
+from .builtins import builtins
 from . import get_schedule_model, get_task_model
 from .fields import (NLPSentenceWidget, PeriodScheduleFiled, OnceScheduleField, MultiWeekdaySelectFiled,
                      MultiMonthdaySelectFiled, MultiYearDaySelectWidget, MultiDaySelectField, PeriodWidget,
@@ -221,6 +222,8 @@ class ScheduleForm(forms.ModelForm):
                     self.initial['timing_year'] = timing_config.get('year')
                 elif timing_type == ScheduleTimingType.DATETIME:
                     self.initial['timing_datetime'] = timing_config.get('datetime')
+        else:
+            self.initial['callback'] = builtins.schedule_callbacks.log_upload
 
     def clean(self):
         cleaned_data = super(ScheduleForm, self).clean()

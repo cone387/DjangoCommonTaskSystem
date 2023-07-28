@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus, PermissionType
+    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus, PermissionType, ExecuteStatus
 )
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
@@ -41,7 +41,7 @@ class Task(models.Model):
     status = common_fields.CharField(max_length=1, default=TaskStatus.ENABLE.value, verbose_name='状态',
                                      choices=TaskStatus.choices)
     # 更新最后一次操作的用户
-    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -70,7 +70,7 @@ class ScheduleCallback(models.Model):
     status = common_fields.CharField(default=ScheduleCallbackStatus.ENABLE.value, verbose_name='状态',
                                      choices=ScheduleCallbackStatus.choices)
     config = common_fields.ConfigField(blank=True, null=True, verbose_name='参数')
-    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -98,11 +98,11 @@ class Schedule(models.Model):
     is_strict = models.BooleanField(default=False, verbose_name='严格模式')
     callback = models.ForeignKey(ScheduleCallback, on_delete=models.SET_NULL,
                                  null=True, blank=True, db_constraint=False, verbose_name='回调')
-    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='用户')
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     # 这里的update_time不能使用auto_now，因为每次next_schedule_time更新时，都会更新update_time,
     # 这样会导致每次更新都会触发post_save且不知道啥时候更新了调度计划
-    update_time = models.DateTimeField(verbose_name='更新时间')
+    update_time = models.DateTimeField(default=timezone.now, verbose_name='更新时间')
 
     def generate_next_schedule(self):
         try:
@@ -145,6 +145,7 @@ class ScheduleQueue(models.Model):
                               default=ScheduleQueueModule.FIFO,
                               choices=ScheduleQueueModule.choices)
     config = models.JSONField(default=dict, verbose_name='配置', null=True, blank=True)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -164,6 +165,7 @@ class ScheduleProducer(models.Model):
     queue = models.ForeignKey(ScheduleQueue, db_constraint=False, related_name='producers',
                               on_delete=models.CASCADE, verbose_name='队列')
     status = models.BooleanField(default=True, verbose_name='启用状态')
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -179,7 +181,7 @@ class ScheduleLog(models.Model):
     id = models.AutoField(primary_key=True)
     schedule = models.ForeignKey(settings.SCHEDULE_MODEL, db_constraint=False, on_delete=models.CASCADE,
                                  verbose_name='任务计划', related_name='logs')
-    status = common_fields.CharField(verbose_name='运行状态')
+    status = common_fields.CharField(verbose_name='运行状态', choices=ExecuteStatus.choices)
     queue = models.CharField(max_length=100, verbose_name='队列', default='opening')
     result = common_fields.ConfigField(blank=True, null=True, verbose_name='结果')
     schedule_time = models.DateTimeField(verbose_name='计划时间')
@@ -205,6 +207,7 @@ class ScheduleQueuePermission(models.Model):
                             choices=PermissionType.choices)
     status = models.BooleanField(default=True, verbose_name='启用状态')
     config = models.JSONField(default=dict, verbose_name='配置', null=True, blank=True)
+    user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
@@ -413,8 +416,8 @@ class MissingScheduleManager(CustomManager):
         return QuerySet(schedules, self.model)
 
 
-class MissingSchedule(Schedule):
-
+class MissingSchedule(models.Model):
+    schedule = models.ForeignKey('Schedule', on_delete=models.DO_NOTHING, verbose_name='计划')
     reason: MissingReason = None
 
     objects = MissingScheduleManager()
