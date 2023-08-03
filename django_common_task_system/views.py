@@ -235,7 +235,6 @@ class ScheduleAPI:
         return JsonResponse(ScheduleSerializer(missing, many=True).data)
 
 
-
 class ScheduleProduceView(APIView):
 
     def post(self, request: Request, pk: int):

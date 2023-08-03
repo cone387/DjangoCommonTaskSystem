@@ -4,7 +4,7 @@ from rest_framework import routers
 
 
 router = routers.DefaultRouter()
-router.register(r'schedule-log', views.ScheduleLogViewSet)
+router.register(r'schedule/log', views.ScheduleLogViewSet)
 
 
 urlpatterns = [

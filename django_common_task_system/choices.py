@@ -76,9 +76,15 @@ class ContainerStatus(TextChoices):
 class ExecuteStatus(TextChoices):
     INIT = 'I'
     RUNNING = 'R'
-    SUCCEED = 'S'
-    EMPTY = 'E'
-    ERROR_BUT_NO_RETRY = 'N'
-    FAILED = 'F'
-    DONE = 'D'
-    TIMEOUT = 'T'
+    SUCCEED = 'S'   # 执行成功了
+    EMPTY = 'E'     # 执行成功了，但是没有结果
+    ERROR_BUT_NO_RETRY = 'N'    # 无需重试的异常, 发生此异常时, 任务将不会重试, 此任务状态为N
+    EXCEPTION = 'X'    # 任务执行过程中发生了异常, 可以重试
+    FAILED = 'F'    # 任务失败, 无需重试
+    TIMEOUT = 'T'   # 任务超时, 可以重试
+
+
+class ScheduleExceptionReason(TextChoices):
+    SCHEDULE_LOG_NOT_FOUND = '没有生成计划日志'
+    EXCEED_MAX_RETRY_TIMES = '超过最大重试次数后仍然失败'
+    OTHER = '其他'

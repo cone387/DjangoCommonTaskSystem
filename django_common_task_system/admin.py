@@ -144,7 +144,7 @@ class ScheduleAdmin(BaseAdmin):
     fields = (
         ("task", "status"),
         "nlp_sentence",
-        ("schedule_type", 'priority', 'base_on_now', 'is_strict'),
+        ("schedule_type", 'priority', 'base_on_now', 'is_strict', 'preserve_log'),
         "period_schedule",
         "once_schedule",
         "crontab",
@@ -466,19 +466,50 @@ class TaskClientAdmin(admin.ModelAdmin):
         return False
 
 
-class MissingScheduleAdmin(admin.ModelAdmin):
-    list_display = ('schedule', 'reason')
+class ScheduleFilter(admin.SimpleListFilter):
+    title = '计划'
+    parameter_name = 'pk'
+
+    def lookups(self, request, model_admin):
+        return ScheduleModel.objects.all().select_related('task').values_list('id', 'task__name')
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(schedule__pk=int(self.value()))
+        return queryset
+
+
+class ExceptionScheduleAdmin(admin.ModelAdmin):
+    list_display = ('id', 'schedule', 'is_strict_schedule', 'schedule_time', 'reason')
+    list_filter = (ScheduleFilter, 'schedule__is_strict', 'schedule__task__category')
+
+    def is_strict_schedule(self, obj):
+        return '是' if obj.schedule.is_strict else '否'
+    is_strict_schedule.short_description = '严格模式'
 
     def get_queryset(self, request):
-        return super(MissingScheduleAdmin, self).get_queryset(request)
-
-    def get_deleted_objects(self, objs, request):
-        return super(MissingScheduleAdmin, self).get_deleted_objects(objs, request)
+        pk = request.GET.get('pk', None)
+        if not pk:
+            first = ScheduleModel.objects.all().first()
+            if first:
+                request.GET._mutable = True
+                pk = request.GET['pk'] = ScheduleModel.objects.all().first().pk
+                request.GET._mutable = False
+        if pk:
+            schedule = ScheduleModel.objects.get(pk=pk)
+            return models.ExceptionSchedule.objects.get_missing_schedule_queryset(schedule)
+        return models.ExceptionSchedule.objects.none()
     
+    # def get_deleted_objects(self, objs, request):
+    #     return super(ExceptionScheduleAdmin, self).get_deleted_objects(objs, request)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 admin.site.register(TaskModel, TaskAdmin)
 admin.site.register(ScheduleModel, ScheduleAdmin)
-admin.site.register(models.MissingSchedule, MissingScheduleAdmin)
+admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
 admin.site.register(models.ScheduleCallback, ScheduleCallbackAdmin)
 admin.site.register(ScheduleLogModel, ScheduleLogAdmin)
 admin.site.register(models.ScheduleQueue, ScheduleQueueAdmin)

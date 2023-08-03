@@ -3,14 +3,16 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus, PermissionType, ExecuteStatus
+    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus,
+    PermissionType, ExecuteStatus, ScheduleExceptionReason
 )
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
+from django_common_task_system.schedule import util as schedule_util
 from django.db.models.signals import post_save
 from django.utils import timezone
 from django.utils.functional import cached_property
@@ -85,9 +87,10 @@ class ScheduleCallback(models.Model):
     __repr__ = __str__
 
 
-class Schedule(models.Model):
+class AbstractSchedule(models.Model):
     id = models.AutoField(primary_key=True)
-    task = models.ForeignKey(settings.TASK_MODEL, on_delete=models.CASCADE, db_constraint=False, verbose_name='任务')
+    task = models.OneToOneField(settings.TASK_MODEL, on_delete=models.CASCADE,
+                                db_constraint=False, verbose_name='任务')
     priority = models.IntegerField(default=0, verbose_name='优先级')
     next_schedule_time = models.DateTimeField(default=timezone.now, verbose_name='下次运行时间', db_index=True)
     schedule_start_time = models.DateTimeField(default=datetime.min, verbose_name='开始时间')
@@ -98,11 +101,31 @@ class Schedule(models.Model):
     is_strict = models.BooleanField(default=False, verbose_name='严格模式')
     callback = models.ForeignKey(ScheduleCallback, on_delete=models.SET_NULL,
                                  null=True, blank=True, db_constraint=False, verbose_name='回调')
+    preserve_log = models.BooleanField(default=True, verbose_name='保留日志')
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     # 这里的update_time不能使用auto_now，因为每次next_schedule_time更新时，都会更新update_time,
     # 这样会导致每次更新都会触发post_save且不知道啥时候更新了调度计划
     update_time = models.DateTimeField(default=timezone.now, verbose_name='更新时间')
+
+    class Meta:
+        verbose_name = verbose_name_plural = '计划中心'
+        ordering = ('-priority', 'next_schedule_time')
+        abstract = True
+
+    def __str__(self):
+        return self.task.name
+
+    __repr__ = __str__
+
+    def __lt__(self, other):
+        return self.priority < other.priority
+
+    def __gt__(self, other):
+        return self.priority > other.priority
+
+
+class Schedule(AbstractSchedule):
 
     def generate_next_schedule(self):
         try:
@@ -117,23 +140,9 @@ class Schedule(models.Model):
         self.save(update_fields=('next_schedule_time', 'status'))
         return self
 
-    class Meta:
-        verbose_name = verbose_name_plural = '计划中心'
-        ordering = ('-priority', 'next_schedule_time')
-        unique_together = ('task', 'status')
+    class Meta(AbstractSchedule.Meta):
         swappable = 'SCHEDULE_MODEL'
         db_table = 'common_schedule'
-
-    def __str__(self):
-        return self.task.name
-
-    __repr__ = __str__
-
-    def __lt__(self, other):
-        return self.priority < other.priority
-
-    def __gt__(self, other):
-        return self.priority > other.priority
 
 
 class ScheduleQueue(models.Model):
@@ -255,14 +264,21 @@ class QuerySet(list):
     def filter(self, **kwargs) -> 'QuerySet':
         queryset = self
         for k, v in kwargs.items():
+            v = str(v)
             try:
-                column, op = k.split('__')
+                column, op = k.rsplit('__', 1)
             except ValueError:
                 column, op = k, 'exact'
+
+            def get_attr(x):
+                for attr in column.split('__'):
+                    x = getattr(x, attr, '')
+                return str(x)
+
             if op == 'in':
-                queryset = self.__class__([x for x in queryset if getattr(x, column, '') in v], self.model)
+                queryset = self.__class__([x for x in queryset if get_attr(x) in v], self.model)
             elif op == 'exact':
-                queryset = self.__class__([x for x in queryset if getattr(x, column, '') == v], self.model)
+                queryset = self.__class__([x for x in queryset if get_attr(x) == v], self.model)
         return queryset
 
     def order_by(self, *args) -> 'QuerySet':
@@ -298,7 +314,7 @@ class QuerySet(list):
                     break
             else:
                 return x
-        raise TaskClient.DoesNotExist
+        raise self.model.DoesNotExist
 
     def _clone(self):
         return self
@@ -317,6 +333,9 @@ class CustomManager(models.Manager, dict):
 
     def filter(self, **kwargs) -> 'QuerySet':
         return self.all().filter(**kwargs)
+
+    def none(self):
+        return QuerySet([], self.model)
 
     def __get__(self, instance, owner):
         return self._meta.managers_map[self.manager.name]
@@ -399,41 +418,76 @@ class TaskClient(models.Model):
         TaskClient.objects.pop(self.client_id)
 
 
-from enum import StrEnum
-
-
-class MissingReason(StrEnum):
-    SCHEDULE_EXCEPTION = 'SCHEDULE_EXCEPTION'
-    EXCEED_MAX_RETRY_TIMES = 'EXCEED_MAX_RETRY_TIMES'
-
-
-class MissingScheduleManager(CustomManager):
+class ExceptionScheduleManager(CustomManager):
 
     def all(self):
-        schedules = []
-        for x in dict.values(self):
-            schedules.extend(x)
-        return QuerySet(schedules, self.model)
+        raise NotImplementedError
+
+    def get(self, pk, default=None):
+        queryset = super().get(pk, default)
+        return queryset[0] if queryset else default
+
+    def get_failed_schedule_queryset(self):
+        return QuerySet([], self.model)
+
+    def get_missing_schedule_queryset(self, schedule: Schedule):
+        queryset = super().get(schedule.pk, None)
+        if queryset is None or (datetime.now() - queryset.calculate_time) > timedelta(minutes=1):
+            missing_schedule_records = schedule_util.get_missing_schedule_records(schedule)
+            schedules = []
+            for schedule_time, failed in missing_schedule_records:
+                if failed:
+                    reason = ScheduleExceptionReason.EXCEED_MAX_RETRY_TIMES
+                else:
+                    reason = ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND
+                missing = ExceptionSchedule(
+                    schedule=schedule,
+                    schedule_time=schedule_time,
+                    reason=reason
+                )
+                missing.id = schedule.pk
+                schedules.append(missing)
+            queryset = QuerySet(schedules, self.model)
+            setattr(queryset, 'calculate_time', datetime.now())
+            self[schedule.pk] = queryset
+        if len(self) > 100:
+            for key in list(self.keys()):
+                if key != schedule.pk:
+                    self.pop(key)
+                    break
+        return queryset
 
 
-class MissingSchedule(models.Model):
-    schedule = models.ForeignKey('Schedule', on_delete=models.DO_NOTHING, verbose_name='计划')
-    reason: MissingReason = None
+class ExceptionSchedule(models.Model):
+    id = models.IntegerField(verbose_name='计划ID', primary_key=True)
+    schedule = models.ForeignKey(settings.SCHEDULE_MODEL, on_delete=models.DO_NOTHING,
+                                 db_constraint=False, verbose_name='计划')
+    schedule_time = models.DateTimeField(verbose_name='计划时间')
+    reason = models.CharField(max_length=100, verbose_name='异常原因',
+                              default=ScheduleExceptionReason.OTHER,
+                              choices=ScheduleExceptionReason.choices)
 
-    objects = MissingScheduleManager()
+    objects = ExceptionScheduleManager()
+
+    def __str__(self):
+        self.schedule: Schedule
+        return self.schedule.task.name
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '缺失调度'
+        verbose_name = verbose_name_plural = '异常计划'
+        ordering = ('id', '-schedule_time',)
 
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        schedules = MissingSchedule.objects.setdefault(self.pk, [])
+        schedules = ExceptionSchedule.objects.setdefault(self.pk, [])
         schedules.append(self)
 
     def delete(self, using=None, keep_parents=False):
-        schedules = MissingSchedule.objects.get(self.pk)
+        super(ExceptionSchedule, self).delete()
+        schedules = ExceptionSchedule.objects.get(self.pk)
         schedules.remove(self)
         if not schedules:
-            MissingSchedule.objects.pop(self.pk)
+            ExceptionSchedule.objects.pop(self.pk)
+        return 1, 1
