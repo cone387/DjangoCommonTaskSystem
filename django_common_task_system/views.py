@@ -26,6 +26,7 @@ from . import serializers, get_task_model, get_schedule_log_model, get_schedule_
 from . import models, system_initialized_signal
 from .schedule import backend as schedule_backend
 import os
+import signal
 
 
 UserModel = models.UserModel
@@ -42,6 +43,12 @@ def on_system_initialized(sender, **kwargs):
         schedule_serializer=ScheduleSerializer
     )
     thread.start()
+
+
+def on_system_shutdown(signum, frame):
+    print('system shutdown, signal: %s' % signum)
+    for client in models.TaskClient.objects.all():
+        client.delete()
 
 
 @receiver(post_delete, sender=models.ScheduleQueue)
@@ -74,12 +81,6 @@ def delete_schedule_queue_permission(sender, instance: models.ScheduleQueuePermi
     builtins.schedule_queue_permissions.delete(instance)
 
 
-def on_system_shutdown(signum, frame):
-    print('system shutdown, signal: %s' % signum)
-    for client in models.TaskClient.objects.all():
-        client.delete()
-
-
 @receiver(post_delete, sender=TaskModel)
 def delete_task(sender, instance: TaskModel, **kwargs):
     if instance.config:
@@ -102,9 +103,11 @@ def add_client(sender, instance: models.TaskClient, created, **kwargs):
         development server in single-threaded mode:
         $ python manage.py  runserver --nothreading --noreload
     """
-    # for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
-    #     if sig is not None:
-    #         signal.signal(sig, on_system_shutdown)
+
+
+for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
+    if sig is not None:
+        signal.signal(sig, on_system_shutdown)
 
 
 class ScheduleAPI:

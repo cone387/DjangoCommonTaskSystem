@@ -85,6 +85,7 @@ class ExecuteStatus(TextChoices):
 
 
 class ScheduleExceptionReason(TextChoices):
-    SCHEDULE_LOG_NOT_FOUND = '没有生成计划日志'
-    EXCEED_MAX_RETRY_TIMES = '超过最大重试次数后仍然失败'
+    SCHEDULE_LOG_NOT_FOUND = '缺失成功的计划日志'
+    MAXIMUM_RETRIES_EXCEEDED = '超过最大重试次数'
+    FAILED_DIRECTLY = '直接失败'
     OTHER = '其他'

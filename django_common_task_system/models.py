@@ -19,6 +19,7 @@ from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
 from docker.models.containers import Container
+from typing import Dict
 import os
 import re
 
@@ -297,7 +298,7 @@ class QuerySet(list):
         self.sort(key=cmp_to_key(custom_sort))
         return self
 
-    def select_related(self, *args) -> 'QuerySet':
+    def select_related(self, *_) -> 'QuerySet':
         return self
 
     def count(self, value=None) -> int:
@@ -419,6 +420,13 @@ class TaskClient(models.Model):
 
 
 class ExceptionScheduleManager(CustomManager):
+    """
+    数据结构
+    {
+        schedule_id: {}
+    }
+
+    """
 
     def all(self):
         raise NotImplementedError
@@ -427,13 +435,30 @@ class ExceptionScheduleManager(CustomManager):
         queryset = super().get(pk, default)
         return queryset[0] if queryset else default
 
-    def get_failed_schedule_queryset(self):
-        return QuerySet([], self.model)
+    def get_exception_queryset(self, reason, schedule: Schedule = None) -> QuerySet:
+        if reason == ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND:
+            return self.get_missing_queryset(schedule)
+        elif reason == ScheduleExceptionReason.MAXIMUM_RETRIES_EXCEEDED:
+            return self.get_exceed_max_retry_times_queryset(schedule)
+        elif reason == ScheduleExceptionReason.FAILED_DIRECTLY:
+            return self.get_failed_directly_queryset(schedule)
+        else:
+            raise ValueError("reason %s is not supported" % reason)
 
-    def get_missing_schedule_queryset(self, schedule: Schedule):
+    def get_maximum_retries_exceeded_queryset(self, schedule: Schedule):
+        return self.get_maximum_retries_exceeded_records(schedule)
+
+    def get_failed_directly_queryset(self, schedule=None):
+        schedules = schedule_util.get_failed_directly_records()
+        queryset = QuerySet(schedules, self.model)
+        if schedule is not None:
+            queryset = queryset.filter(schedule=schedule)
+        return queryset
+
+    def get_missing_queryset(self, schedule: Schedule):
         queryset = super().get(schedule.pk, None)
         if queryset is None or (datetime.now() - queryset.calculate_time) > timedelta(minutes=1):
-            missing_schedule_records = schedule_util.get_missing_schedule_records(schedule)
+            missing_schedule_records = schedule_util.get_log_missing_records(schedule)
             schedules = []
             for schedule_time, failed in missing_schedule_records:
                 if failed:

@@ -8,6 +8,7 @@ from datetime import datetime
 from docker.errors import APIError
 from django.urls import resolve
 import docker
+from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
 from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
@@ -19,7 +20,6 @@ UserModel = models.UserModel
 TaskModel: models.Task = get_task_model()
 ScheduleModel: models.Schedule = get_schedule_model()
 ScheduleLogModel: models.ScheduleLog = get_schedule_log_model()
-from django.db.models import Exists, OuterRef, Q
 
 
 class TaskParentFilter(admin.SimpleListFilter):
@@ -481,7 +481,7 @@ class ScheduleFilter(admin.SimpleListFilter):
 
 class ExceptionScheduleAdmin(admin.ModelAdmin):
     list_display = ('id', 'schedule', 'is_strict_schedule', 'schedule_time', 'reason')
-    list_filter = (ScheduleFilter, 'schedule__is_strict', 'schedule__task__category')
+    list_filter = (ScheduleFilter, 'schedule__is_strict', 'reason', 'schedule__task__category')
 
     def is_strict_schedule(self, obj):
         return '是' if obj.schedule.is_strict else '否'
@@ -489,6 +489,7 @@ class ExceptionScheduleAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         pk = request.GET.get('pk', None)
+        reason = request.GET.get('reason', None)
         if not pk:
             first = ScheduleModel.objects.all().first()
             if first:
@@ -497,7 +498,7 @@ class ExceptionScheduleAdmin(admin.ModelAdmin):
                 request.GET._mutable = False
         if pk:
             schedule = ScheduleModel.objects.get(pk=pk)
-            return models.ExceptionSchedule.objects.get_missing_schedule_queryset(schedule)
+            return models.ExceptionSchedule.objects.get_exception_queryset(reason=reason, schedule=schedule)
         return models.ExceptionSchedule.objects.none()
     
     # def get_deleted_objects(self, objs, request):

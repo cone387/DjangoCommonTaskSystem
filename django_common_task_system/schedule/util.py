@@ -1,7 +1,9 @@
 from django.db import connection
 from datetime import datetime
 from dateutil import parser
-from django_common_task_system import get_schedule_log_model
+from django.db.models import Count, Max
+from django_common_task_system.choices import ExecuteStatus
+from django_common_task_system import get_schedule_log_model, get_schedule_model
 from .config import ScheduleConfig
 import copy
 
@@ -47,7 +49,7 @@ def get_history_schedules(schedule, start_time=None, end_time=None):
     return schedules
 
 
-def get_missing_schedule_records(schedule, start_time=None, end_time=None):
+def get_log_missing_records(schedule, start_time=None, end_time=None):
     ScheduleLogModel = get_schedule_log_model()
     missing = []
     schedule.config['base_on_now'] = False
@@ -120,7 +122,7 @@ def get_missing_schedule_records(schedule, start_time=None, end_time=None):
 
 def get_missing_schedules(schedule, start_time=None, end_time=None):
     missing = []
-    for schedule_time in get_missing_schedule_records(schedule, start_time=start_time, end_time=end_time):
+    for schedule_time in get_log_missing_records(schedule, start_time=start_time, end_time=end_time):
         o = copy.copy(schedule)
         o.next_schedule_time = schedule_time
         missing.append(o)
@@ -135,22 +137,42 @@ def get_missing_schedules_mapping(schedules,
     return result
 
 
-def get_failed_schedules(start_time, end_time, max_retry_times=5, max_fetch_num=1000):
+def get_maximum_retries_exceeded_records(start_time=None, end_time=None, max_retry_times=5, max_fetch_num=1000):
     ScheduleLog = get_schedule_log_model()
-    command = '''
-                select queue, schedule_id, schedule_time, count(*) as times, 
-                    max(id) as log_id, max(create_time) as lastest_time 
-                from %s where create_time > %s and status in ('X', 'T') 
-                GROUP BY queue, schedule_id, schedule_time 
-                having times < %s and lastest_time > '%s' 
-                order by queue, schedule_id, schedule_time limit %s
-            ''' % (ScheduleLog._meta.db_table, start_time, max_retry_times, end_time, max_fetch_num,)
-    with connection.cursor() as cursor:
-        cursor.execute(command)
-        log_ids = [str(x[4]) for x in cursor.fetchall()]
-    batch_num = 1000
-    i = 0
-    batch = log_ids[:batch_num]
+    failed_schedule_logs = ScheduleLog.objects.filter(create_time__lt=start_time, status__in=['X', 'T']).values(
+        'queue', 'schedule_id', 'schedule_time'
+    ).annotate(
+        times=Count('id'),
+        log_id=Max('id'),
+        latest_time=Max('create_time'),
+    ).filter(
+        times__gte=max_retry_times,
+        latest_time__gt=end_time,
+    ).order_by('queue', 'schedule_id', 'schedule_time')
+    return failed_schedule_logs
+
+
+def get_failed_directly_records(start_time=None, end_time=None, max_retry_times=5, max_fetch_num=1000):
+    ScheduleLog = get_schedule_log_model()
+    failed_schedule_logs = ScheduleLog.objects.filter(create_time__lt=start_time, status=ExecuteStatus.FAILED).values(
+        'queue', 'schedule_id', 'schedule_time'
+    )
+    return failed_schedule_logs
+    # command = '''
+    #             select queue, schedule_id, schedule_time, count(*) as times,
+    #                 max(id) as log_id, max(create_time) as latest_time
+    #             from %s where create_time > %s and status in ('X', 'T')
+    #             GROUP BY queue, schedule_id, schedule_time
+    #             having times >= %s and lastest_time > '%s'
+    #             order by queue, schedule_id, schedule_time limit %s
+    #         ''' % (ScheduleLog._meta.db_table, start_time, max_retry_times, end_time, max_fetch_num,)
+    # schedules = []
+    # with connection.cursor() as cursor:
+    #     cursor.execute(command)
+    #     for queue, schedule_id, schedule_time, times, log_id, latest_time in cursor.fetchall():
+    #         schedule = Schedule(id=schedule_id, next_schedule_time=schedule_time)
+    #         schedules.append(schedule)
+    # return schedules
 
 
 def get_retry_schedules(start_time, end_time, max_retry_times=5, max_fetch_num=1000):
