@@ -13,13 +13,13 @@ from urllib.parse import urlparse
 from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
 from . import models
-from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType
+from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason
 
 
 UserModel = models.UserModel
-TaskModel: models.Task = get_task_model()
-ScheduleModel: models.Schedule = get_schedule_model()
-ScheduleLogModel: models.ScheduleLog = get_schedule_log_model()
+Task: models.Task = get_task_model()
+Schedule: models.Schedule = get_schedule_model()
+ScheduleLog: models.ScheduleLog = get_schedule_log_model()
 
 
 class TaskParentFilter(admin.SimpleListFilter):
@@ -29,8 +29,8 @@ class TaskParentFilter(admin.SimpleListFilter):
     other = ('-1', '其它')
 
     def lookups(self, request, model_admin):
-        parent_tasks_with_children = TaskModel.objects.annotate(
-            has_children=Exists(TaskModel.objects.filter(parent=OuterRef('id')))).filter(has_children=True)
+        parent_tasks_with_children = Task.objects.annotate(
+            has_children=Exists(Task.objects.filter(parent=OuterRef('id')))).filter(has_children=True)
         lookups = [(task.id, task.name) for task in parent_tasks_with_children]
         lookups.append(self.other)
         return lookups
@@ -95,17 +95,17 @@ class TaskAdmin(BaseAdmin):
         schedules = self.extra_context['schedules'].get(obj.id, 0)
         if schedules:
             return format_html('<a href="/admin/%s/%s/?task__id__exact=%s">查看(%s)</a>' % (
-                obj._meta.app_label, ScheduleModel._meta.model_name, obj.id, schedules
+                obj._meta.app_label, Schedule._meta.model_name, obj.id, schedules
             ))
         return format_html('<a href="/admin/%s/%s/add/?task=%s">创建计划</a>' % (
-            obj._meta.app_label, ScheduleModel._meta.model_name, obj.id
+            obj._meta.app_label, Schedule._meta.model_name, obj.id
         ))
 
     schedules.short_description = '任务计划'
 
     def changelist_view(self, request, extra_context=None):
         queryset = self.get_queryset(request)
-        schedules = ScheduleModel.objects.filter(task__in=queryset, ).values('task__id').annotate(Count('task__id'))
+        schedules = Schedule.objects.filter(task__in=queryset, ).values('task__id').annotate(Count('task__id'))
         self.extra_context['schedules'] = {x['task__id']: x['task__id__count'] for x in schedules}
         return super(TaskAdmin, self).changelist_view(request, extra_context=self.extra_context)
 
@@ -160,21 +160,21 @@ class ScheduleAdmin(BaseAdmin):
         'config',
     )
 
-    def strict(self, obj: ScheduleModel):
+    def strict(self, obj: Schedule):
         return '是' if obj.is_strict else '否'
     strict.boolean = False
     strict.short_description = '严格模式'
 
     def admin_task(self, obj):
         return format_html('<a href="/admin/%s/%s/%s/change/">%s</a>' % (
-            obj._meta.app_label, TaskModel._meta.model_name, obj.task.id, obj.task.name
+            obj._meta.app_label, Task._meta.model_name, obj.task.id, obj.task.name
         ))
 
     admin_task.short_description = '任务'
 
     def logs(self, obj):
         return format_html('<a href="/admin/%s/%s/?schedule__id__exact=%s">查看</a>' % (
-            obj._meta.app_label, ScheduleLogModel._meta.model_name, obj.id
+            obj._meta.app_label, ScheduleLog._meta.model_name, obj.id
         ))
 
     logs.short_description = '日志'
@@ -365,15 +365,12 @@ class ScheduleQueuePermissionAdmin(BaseAdmin):
 
 
 class ExceptionReportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'group', 'ip', 'content', 'create_time')
+    list_display = ('id', 'client', 'ip', 'content', 'create_time')
 
-    list_filter = ('ip', 'group', 'create_time')
+    list_filter = ('ip', 'client', 'create_time')
 
     def get_readonly_fields(self, request, obj=None):
         return [field.name for field in self.model._meta.fields]
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).filter(group=self.model._meta.app_label)
 
 
 class TaskClientAdmin(admin.ModelAdmin):
@@ -471,7 +468,7 @@ class ScheduleFilter(admin.SimpleListFilter):
     parameter_name = 'pk'
 
     def lookups(self, request, model_admin):
-        return ScheduleModel.objects.all().select_related('task').values_list('id', 'task__name')
+        return Schedule.objects.all().select_related('task').values_list('id', 'task__name')
 
     def queryset(self, request, queryset):
         if self.value():
@@ -479,27 +476,114 @@ class ScheduleFilter(admin.SimpleListFilter):
         return queryset
 
 
+class QueueFilter(admin.SimpleListFilter):
+    title = '队列'
+    parameter_name = 'queue'
+
+    def lookups(self, request, model_admin):
+        return [(x.code, '%s(%s)' % (x.name, x.code)) for x in builtins.schedule_queues.values()]
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(queue=self.value())
+        return queryset
+
+    def choices(self, changelist):
+        for lookup, title in self.lookup_choices:
+            yield {
+                "selected": self.value() == str(lookup),
+                "query_string": changelist.get_query_string(
+                    {self.parameter_name: lookup}
+                ),
+                "display": title,
+            }
+
+
+class ReasonFilter(admin.SimpleListFilter):
+    title = "异常原因"
+    parameter_name = 'reason'
+
+    def lookups(self, request, model_admin):
+        return ScheduleExceptionReason.choices
+
+    def queryset(self, request, queryset):
+        if self.value():
+            return queryset.filter(reason=self.value())
+        return queryset
+
+    def choices(self, changelist):
+        for lookup, title in self.lookup_choices:
+            yield {
+                "selected": self.value() == str(lookup),
+                "query_string": changelist.get_query_string(
+                    {self.parameter_name: lookup}
+                ),
+                "display": title,
+            }
+
+
+class IsStrictFilter(admin.SimpleListFilter):
+    title = "严格模式"
+    parameter_name = 'schedule__is_strict'
+
+    def lookups(self, request, model_admin):
+        return [('True', '是'), ('False', '否')]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'True':
+            queryset = queryset.filter(schedule__is_strict__exact=True)
+        elif self.value() == 'False':
+            queryset = queryset.filter(schedule__is_strict__exact=False)
+        return queryset
+
+
 class ExceptionScheduleAdmin(admin.ModelAdmin):
-    list_display = ('id', 'schedule', 'is_strict_schedule', 'schedule_time', 'reason')
-    list_filter = (ScheduleFilter, 'schedule__is_strict', 'reason', 'schedule__task__category')
+    list_display = ('id', 'origin_schedule', 'is_strict_schedule', 'schedule_time', 'reason', 'logs', 'retry')
+    list_filter = (ScheduleFilter, QueueFilter, ReasonFilter, IsStrictFilter, 'schedule__task__category')
 
     def is_strict_schedule(self, obj):
         return '是' if obj.schedule.is_strict else '否'
     is_strict_schedule.short_description = '严格模式'
 
+    def logs(self, obj):
+        return format_html(
+            '<a href="/admin/django_common_task_system/%s/?schedule__id__exact=%s&schedule_time__exact=%s" '
+            'target="_blank">查看日志</a>' % (
+                ScheduleLog._meta.model_name,
+                obj.pk, obj.schedule_time
+            )
+        )
+    logs.short_description = '日志'
+
+    def origin_schedule(self, obj):
+        return format_html(
+            '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">%s</a>' % (
+                Schedule._meta.model_name,
+                obj.schedule.pk,
+                obj.schedule.task.name
+            )
+        )
+    origin_schedule.short_description = '计划'
+
+    def retry(self, obj: models.ExceptionSchedule):
+        put_url = reverse('schedule-put')
+        return format_html('<a href="%s?data=%s,%s,%s" target="_blank">重试</a>' % (
+            put_url, obj.schedule.id, obj.queue, obj.schedule_time.strftime('%Y%m%d%H%M%S')
+        ))
+    retry.short_description = '重试'
+
+    def get_list_filter(self, request):
+        return self.list_filter
+
     def get_queryset(self, request):
-        pk = request.GET.get('pk', None)
-        reason = request.GET.get('reason', None)
-        if not pk:
-            first = ScheduleModel.objects.all().first()
-            if first:
-                request.GET._mutable = True
-                pk = request.GET['pk'] = ScheduleModel.objects.all().first().pk
-                request.GET._mutable = False
-        if pk:
-            schedule = ScheduleModel.objects.get(pk=pk)
-            return models.ExceptionSchedule.objects.get_exception_queryset(reason=reason, schedule=schedule)
-        return models.ExceptionSchedule.objects.none()
+        pk = request.GET.get('pk')
+        request.GET._mutable = True
+        reason = request.GET.setdefault(ReasonFilter.parameter_name, ScheduleExceptionReason.FAILED_DIRECTLY)
+        queue = request.GET.setdefault(QueueFilter.parameter_name, builtins.schedule_queues.opening.code)
+        if reason == ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND:
+            request.GET[IsStrictFilter.parameter_name] = 'True'
+        request.GET._mutable = False
+        return models.ExceptionSchedule.objects.get_exception_queryset(queue, reason, pk)
     
     # def get_deleted_objects(self, objs, request):
     #     return super(ExceptionScheduleAdmin, self).get_deleted_objects(objs, request)
@@ -508,15 +592,27 @@ class ExceptionScheduleAdmin(admin.ModelAdmin):
         return False
 
 
-admin.site.register(TaskModel, TaskAdmin)
-admin.site.register(ScheduleModel, ScheduleAdmin)
-admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
+class RetryScheduleAdmin(ExceptionScheduleAdmin):
+    list_filter = (ScheduleFilter, QueueFilter, IsStrictFilter, 'schedule__task__category')
+
+    def get_queryset(self, request):
+        pk = request.GET.get('pk')
+        request.GET._mutable = True
+        queue = request.GET.setdefault(QueueFilter.parameter_name, builtins.schedule_queues.opening.code)
+        request.GET._mutable = False
+        return models.ExceptionSchedule.objects.get_retry_queryset(queue, pk)
+
+
+admin.site.register(Task, TaskAdmin)
+admin.site.register(Schedule, ScheduleAdmin)
 admin.site.register(models.ScheduleCallback, ScheduleCallbackAdmin)
-admin.site.register(ScheduleLogModel, ScheduleLogAdmin)
+admin.site.register(ScheduleLog, ScheduleLogAdmin)
 admin.site.register(models.ScheduleQueue, ScheduleQueueAdmin)
 admin.site.register(models.ScheduleProducer, ScheduleProducerAdmin)
 admin.site.register(models.ScheduleQueuePermission, ScheduleQueuePermissionAdmin)
 admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
+admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
+admin.site.register(models.RetrySchedule, RetryScheduleAdmin)
 admin.site.register(models.TaskClient, TaskClientAdmin)
 
 

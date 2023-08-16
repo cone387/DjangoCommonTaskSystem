@@ -49,7 +49,7 @@ def get_history_schedules(schedule, start_time=None, end_time=None):
     return schedules
 
 
-def get_log_missing_records(schedule, start_time=None, end_time=None):
+def get_log_missing_records(queue, schedule, start_time=None, end_time=None):
     ScheduleLogModel = get_schedule_log_model()
     missing = []
     schedule.config['base_on_now'] = False
@@ -98,104 +98,94 @@ def get_log_missing_records(schedule, start_time=None, end_time=None):
                             """)
     schedule_date_command = ' union all '.join(schedule_date_commands)
     command = f"""
-                select a.date, b.failed from ({schedule_date_command}) a 
+                select a.date from ({schedule_date_command}) a 
                 left join (
-                    select schedule_time, count(status = 'F' or null) as failed, count(status) as log_num 
+                    select schedule_time, count(1) as log_num 
                     from {ScheduleLogModel._meta.db_table} 
                     where 
                         schedule_id = {schedule.id} and 
-                        schedule_time between '{start_time}' and '{end_time}'
+                        queue = '{queue}' and 
+                        schedule_time between '{start_time}' and '{end_time}' 
                     group by schedule_time
                 ) b 
-                on a.date = b.schedule_time where b.failed is not null or b.log_num is null
+                on a.date = b.schedule_time where b.log_num is null
             """
     time = schedule.config[schedule.config['schedule_type']].get('time', '03:00:00')
     with connection.cursor() as cursor:
         cursor.execute(command)
-        for d, f in cursor.fetchall():
+        for d, *_ in cursor.fetchall():
             # 根据日志查出来的遗漏日期就是实际的日期，不需要根据latest_days来计算
             if len(d) == 10:
                 d = d + ' ' + time
-            missing.append((parser.parse(d), f))
+            missing.append(parser.parse(d))
     return missing
 
 
-def get_missing_schedules(schedule, start_time=None, end_time=None):
+def get_missing_schedules(queue, schedule, start_time=None, end_time=None):
     missing = []
-    for schedule_time in get_log_missing_records(schedule, start_time=start_time, end_time=end_time):
+    for schedule_time in get_log_missing_records(queue, schedule, start_time=start_time, end_time=end_time):
         o = copy.copy(schedule)
         o.next_schedule_time = schedule_time
         missing.append(o)
     return missing
 
 
-def get_missing_schedules_mapping(schedules,
+def get_missing_schedules_mapping(queue, schedules,
                                   start_time=None, end_time=None):
     result = {}
     for schedule in schedules:
-        result[schedule.id] = get_missing_schedules(schedule, start_time=start_time, end_time=end_time)
+        result[schedule.id] = get_missing_schedules(queue, schedule, start_time=start_time, end_time=end_time)
     return result
 
 
-def get_maximum_retries_exceeded_records(start_time=None, end_time=None, max_retry_times=5, max_fetch_num=1000):
+def get_maximum_retries_exceeded_records(queue, start_time=None, end_time=None, max_retry_times=5):
     ScheduleLog = get_schedule_log_model()
-    failed_schedule_logs = ScheduleLog.objects.filter(create_time__lt=start_time, status__in=['X', 'T']).values(
-        'queue', 'schedule_id', 'schedule_time'
+    queryset = ScheduleLog.objects.filter(status__in=['X', 'T'], queue=queue)
+    if start_time:
+        queryset = queryset.filter(create_time__gte=start_time)
+    if end_time:
+        queryset = queryset.filter(create_time__lt=end_time)
+    queryset = queryset.values(
+        'schedule_id', 'schedule_time'
     ).annotate(
         times=Count('id'),
         log_id=Max('id'),
         latest_time=Max('create_time'),
     ).filter(
         times__gte=max_retry_times,
-        latest_time__gt=end_time,
-    ).order_by('queue', 'schedule_id', 'schedule_time')
-    return failed_schedule_logs
+    ).order_by('schedule_id', 'schedule_time')
+    return queryset
 
 
-def get_failed_directly_records(start_time=None, end_time=None, max_retry_times=5, max_fetch_num=1000):
+def get_failed_directly_records(queue, start_time=None, end_time=None):
     ScheduleLog = get_schedule_log_model()
-    failed_schedule_logs = ScheduleLog.objects.filter(create_time__lt=start_time, status=ExecuteStatus.FAILED).values(
-        'queue', 'schedule_id', 'schedule_time'
+    queryset = ScheduleLog.objects.filter(status=ExecuteStatus.FAILED, queue=queue)
+    if start_time:
+        queryset = queryset.filter(create_time__gte=start_time)
+    if end_time:
+        queryset = queryset.filter(create_time__lt=end_time)
+    queryset = queryset.values('schedule_id', 'schedule_time').annotate(
+        count=Count('id'),
     )
-    return failed_schedule_logs
-    # command = '''
-    #             select queue, schedule_id, schedule_time, count(*) as times,
-    #                 max(id) as log_id, max(create_time) as latest_time
-    #             from %s where create_time > %s and status in ('X', 'T')
-    #             GROUP BY queue, schedule_id, schedule_time
-    #             having times >= %s and lastest_time > '%s'
-    #             order by queue, schedule_id, schedule_time limit %s
-    #         ''' % (ScheduleLog._meta.db_table, start_time, max_retry_times, end_time, max_fetch_num,)
-    # schedules = []
-    # with connection.cursor() as cursor:
-    #     cursor.execute(command)
-    #     for queue, schedule_id, schedule_time, times, log_id, latest_time in cursor.fetchall():
-    #         schedule = Schedule(id=schedule_id, next_schedule_time=schedule_time)
-    #         schedules.append(schedule)
-    # return schedules
+    return queryset
 
 
-def get_retry_schedules(start_time, end_time, max_retry_times=5, max_fetch_num=1000):
+def get_retry_records(queue, start_time=None, end_time=None):
+    # lt = less than    gt = greater than
+    # lt = less than    gt = greater than
     ScheduleLog = get_schedule_log_model()
-    command = '''
-                select queue, schedule_id, schedule_time, count(*) as times, 
-                    max(id) as log_id, max(create_time) as lastest_time 
-                from %s where create_time > %s and status in ('F', 'T') 
-                GROUP BY queue, schedule_id, schedule_time 
-                having times < %s and lastest_time > '%s' 
-                order by queue, schedule_id, schedule_time limit %s
-            ''' % (ScheduleLog._meta.db_table, start_time, max_retry_times, end_time, max_fetch_num,)
-    with connection.cursor() as cursor:
-        cursor.execute(command)
-        log_ids = [str(x[4]) for x in cursor.fetchall()]
-    batch_num = 1000
-    i = 0
-    batch = log_ids[:batch_num]
-    while batch:
-        command = '''
-                    update %s set status = 'Q' where id in (%s)
-                ''' % (ScheduleLog._meta.db_table, ','.join(batch))
-        with connection.cursor() as cursor:
-            cursor.execute(command)
-        i += 1
-        batch = log_ids[i * batch_num:(i + 1) * batch_num]
+    queryset = ScheduleLog.objects.filter(status__in=['X', 'T'], queue=queue)
+    if start_time:
+        queryset = queryset.filter(create_time__gte=start_time)
+    if end_time:
+        queryset = queryset.filter(create_time__lt=end_time)
+    queryset = queryset.values(
+        'schedule_id', 'schedule_time'
+    ).annotate(
+        times=Count('id'),
+        log_id=Max('id'),
+        latest_time=Max('create_time'),
+    ).filter(
+        times__lt=5,
+    ).order_by('schedule_id', 'schedule_time')
+    return queryset

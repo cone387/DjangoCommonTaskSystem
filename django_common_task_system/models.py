@@ -234,7 +234,7 @@ class ScheduleQueuePermission(models.Model):
 
 class ExceptionReport(models.Model):
     id = models.AutoField(primary_key=True, verbose_name='ID')
-    group = models.CharField(max_length=100, verbose_name='分组')
+    client = models.CharField(max_length=100, verbose_name='客户端')
     ip = models.CharField(max_length=100, verbose_name='IP')
     content = models.TextField(verbose_name='内容')
     create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
@@ -368,7 +368,7 @@ class TaskClient(models.Model):
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '客户端'
+        verbose_name = verbose_name_plural = '客户端管理'
 
     def __str__(self):
         return str(self.client_id)
@@ -420,13 +420,6 @@ class TaskClient(models.Model):
 
 
 class ExceptionScheduleManager(CustomManager):
-    """
-    数据结构
-    {
-        schedule_id: {}
-    }
-
-    """
 
     def all(self):
         raise NotImplementedError
@@ -435,52 +428,78 @@ class ExceptionScheduleManager(CustomManager):
         queryset = super().get(pk, default)
         return queryset[0] if queryset else default
 
-    def get_exception_queryset(self, reason, schedule: Schedule = None) -> QuerySet:
+    def records_to_queryset(self, records, schedule, queue, reason):
+        mapping = {}
+        for x in records:
+            mapping.setdefault(x['schedule_id'], []).append(x)
+        if schedule is None:
+            schedules = Schedule.objects.filter(pk__in=mapping.keys()).select_related('task')
+        else:
+            schedules = [schedule]
+        queryset = []
+        for x in schedules:
+            for e in mapping.get(x.pk, []):
+                exception = ExceptionSchedule(
+                    id=x.pk,
+                    schedule_time=e['schedule_time'],
+                    queue=queue,
+                    reason=reason,
+                    schedule=x,
+                )
+                queryset.append(exception)
+        return QuerySet(queryset, self.model)
+
+    def get_retry_queryset(self, queue: str, schedule_pk) -> QuerySet:
+        records = schedule_util.get_retry_records(queue)
+        if schedule_pk:
+            schedule = Schedule.objects.get(id=schedule_pk)
+            records = records.filter(schedule=schedule)
+        else:
+            schedule = None
+        return self.records_to_queryset(records, schedule, queue, "retry")
+
+    def get_exception_queryset(self, queue: str, reason, schedule_pk) -> QuerySet:
+        if schedule_pk:
+            schedule = Schedule.objects.get(id=schedule_pk)
+        else:
+            schedule = None
         if reason == ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND:
-            return self.get_missing_queryset(schedule)
+            queryset = self.get_missing_queryset(queue, schedule)
         elif reason == ScheduleExceptionReason.MAXIMUM_RETRIES_EXCEEDED:
-            return self.get_exceed_max_retry_times_queryset(schedule)
+            queryset = self.get_maximum_retries_exceeded_queryset(queue, schedule)
         elif reason == ScheduleExceptionReason.FAILED_DIRECTLY:
-            return self.get_failed_directly_queryset(schedule)
+            queryset = self.get_failed_directly_queryset(queue, schedule)
         else:
             raise ValueError("reason %s is not supported" % reason)
+        return queryset
 
-    def get_maximum_retries_exceeded_queryset(self, schedule: Schedule):
-        return self.get_maximum_retries_exceeded_records(schedule)
-
-    def get_failed_directly_queryset(self, schedule=None):
-        schedules = schedule_util.get_failed_directly_records()
-        queryset = QuerySet(schedules, self.model)
+    def get_maximum_retries_exceeded_queryset(self, queue: str, schedule: Schedule):
+        records = schedule_util.get_maximum_retries_exceeded_records(schedule)
         if schedule is not None:
-            queryset = queryset.filter(schedule=schedule)
-        return queryset
+            records = records.filter(schedule=schedule.id)
+        return self.records_to_queryset(records, schedule, queue, ScheduleExceptionReason.MAXIMUM_RETRIES_EXCEEDED)
 
-    def get_missing_queryset(self, schedule: Schedule):
-        queryset = super().get(schedule.pk, None)
-        if queryset is None or (datetime.now() - queryset.calculate_time) > timedelta(minutes=1):
-            missing_schedule_records = schedule_util.get_log_missing_records(schedule)
-            schedules = []
-            for schedule_time, failed in missing_schedule_records:
-                if failed:
-                    reason = ScheduleExceptionReason.EXCEED_MAX_RETRY_TIMES
-                else:
-                    reason = ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND
-                missing = ExceptionSchedule(
-                    schedule=schedule,
-                    schedule_time=schedule_time,
-                    reason=reason
-                )
-                missing.id = schedule.pk
-                schedules.append(missing)
-            queryset = QuerySet(schedules, self.model)
-            setattr(queryset, 'calculate_time', datetime.now())
-            self[schedule.pk] = queryset
-        if len(self) > 100:
-            for key in list(self.keys()):
-                if key != schedule.pk:
-                    self.pop(key)
-                    break
-        return queryset
+    def get_failed_directly_queryset(self, queue: str, schedule: Schedule):
+        records = schedule_util.get_failed_directly_records(queue)
+        if schedule is not None:
+            records = records.filter(schedule=schedule.id)
+        return self.records_to_queryset(records, schedule, queue, ScheduleExceptionReason.FAILED_DIRECTLY)
+
+    def get_missing_queryset(self, queue, schedule: Schedule):
+        if schedule is None or not schedule.is_strict:
+            return self.none()
+        missing_schedule_records = schedule_util.get_log_missing_records(queue, schedule)
+        schedules = []
+        for schedule_time in missing_schedule_records:
+            missing = ExceptionSchedule(
+                id=schedule.pk,
+                queue=queue,
+                schedule=schedule,
+                schedule_time=schedule_time,
+                reason=ScheduleExceptionReason.SCHEDULE_LOG_NOT_FOUND
+            )
+            schedules.append(missing)
+        return QuerySet(schedules, self.model)
 
 
 class ExceptionSchedule(models.Model):
@@ -488,8 +507,9 @@ class ExceptionSchedule(models.Model):
     schedule = models.ForeignKey(settings.SCHEDULE_MODEL, on_delete=models.DO_NOTHING,
                                  db_constraint=False, verbose_name='计划')
     schedule_time = models.DateTimeField(verbose_name='计划时间')
+    queue = models.CharField(max_length=100, verbose_name='队列')
     reason = models.CharField(max_length=100, verbose_name='异常原因',
-                              default=ScheduleExceptionReason.OTHER,
+                              default=ScheduleExceptionReason.FAILED_DIRECTLY,
                               choices=ScheduleExceptionReason.choices)
 
     objects = ExceptionScheduleManager()
@@ -500,7 +520,7 @@ class ExceptionSchedule(models.Model):
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '异常计划'
+        verbose_name = verbose_name_plural = '异常的计划'
         ordering = ('id', '-schedule_time',)
 
     def save(
@@ -516,3 +536,11 @@ class ExceptionSchedule(models.Model):
         if not schedules:
             ExceptionSchedule.objects.pop(self.pk)
         return 1, 1
+
+
+class RetrySchedule(ExceptionSchedule):
+
+    class Meta:
+        managed = False
+        verbose_name = verbose_name_plural = '待重试计划'
+        ordering = ('id', '-schedule_time',)

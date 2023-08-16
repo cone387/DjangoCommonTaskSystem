@@ -8,7 +8,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django_common_objects.models import CommonCategory
 from jionlp_time import parse_time
 from rest_framework import status
-from rest_framework.generics import CreateAPIView
+from rest_framework.decorators import api_view
+from rest_framework.generics import CreateAPIView, RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -16,7 +17,7 @@ from django_common_task_system.utils.foreign_key import get_model_related
 from django_common_task_system.utils.schedule_time import nlp_config_to_schedule_config
 from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from rest_framework.request import Request
-from django.http.response import JsonResponse, HttpResponse
+from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
 from .choices import TaskClientStatus, ScheduleStatus
 from .client import start_client
@@ -25,8 +26,10 @@ from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
 from .schedule import backend as schedule_backend
+from typing import List, Dict, Union
 import os
 import signal
+import json
 
 
 UserModel = models.UserModel
@@ -110,118 +113,116 @@ for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), get
         signal.signal(sig, on_system_shutdown)
 
 
+def retry_from_log_ids(log_ids: List[int]):
+    result = {x: 'no such log' for x in log_ids}
+    related = get_model_related(ScheduleLogModel, excludes=[UserModel, CommonCategory])
+    logs = ScheduleLogModel.objects.filter(id__in=log_ids).select_related(*related)
+    for log in logs:
+        schedule = log.schedule
+        queue = builtins.schedule_queues[log.queue].queue
+        schedule.next_schedule_time = log.schedule_time
+        schedule.generator = 'retry'
+        schedule.last_log = log.result
+        schedule.queue = log.queue
+        data = ScheduleSerializer(schedule).data
+        queue.put(data)
+        result[log.id] = "%s->%s" % (schedule.id, log.queue)
+    return result
+
+
+ScheduleRecord = Dict[str, Dict[str, List[str]]]
+
+
+def put_schedules(records: ScheduleRecord):
+    schedules = ScheduleModel.objects.filter(id__in=records.keys())
+    schedule_mapping = {str(x.id): x for x in schedules}
+    result: Dict[str, Union[Dict[str, str], str]] = {}
+    for schedule_id, record in records.items():
+        schedule = schedule_mapping.get(schedule_id, None)
+        if schedule is None:
+            result[schedule_id] = 'no such schedule'
+        else:
+            schedule_result = result.setdefault(schedule_id, {})
+            for queue, schedule_times in record.items():
+                schedule_queue = builtins.schedule_queues.get(queue, None)
+                if schedule_queue is None:
+                    schedule_result[queue] = 'no such queue'
+                    continue
+                queue_instance = schedule_queue.queue
+                for schedule_time in schedule_times:
+                    schedule.next_schedule_time = schedule_time
+                    schedule.generator = 'put'
+                    schedule.queue = queue
+                    data = ScheduleSerializer(schedule).data
+                    queue_instance.put(data)
+                schedule_result[queue] = "%s schedule(s) put" % len(schedule_times)
+    return result
+
+
 class ScheduleAPI:
 
     @staticmethod
+    @api_view(['GET'])
     def get(request: Request, code: str):
         instance = builtins.schedule_queues.get(code, None)
         if instance is None:
-            return JsonResponse({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
         permission_validator = builtins.schedule_queue_permissions.get(code, None)
         if permission_validator is not None:
             error = permission_validator.validate(request)
             if error:
-                return JsonResponse({'error': error}, status=status.HTTP_403_FORBIDDEN)
+                return Response({'error': error}, status=status.HTTP_403_FORBIDDEN)
         try:
-            task = instance.queue.get_nowait()
+            schedule = instance.queue.get_nowait()
         except Empty:
-            return JsonResponse({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
+            return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
-            return JsonResponse({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
-        return JsonResponse(task)
-
-    @staticmethod
-    def get_by_id(request, pk):
-        try:
-            schedule = ScheduleModel.objects.get(id=pk)
-            return Response(ScheduleSerializer(schedule).data)
-        except ScheduleModel.DoesNotExist:
-            return Response({'error': 'schedule not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(schedule)
 
     @staticmethod
     @csrf_exempt
-    def retry(request):
-        log_ids = request.GET.get('log-ids', None) or request.POST.get('log-ids', None)
+    @api_view(['GET', 'POST'])
+    def retry(request: Request):
+        log_ids = request.data
         if not log_ids:
-            return JsonResponse({'error': 'log-ids不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+            log_ids = request.GET.get('log-ids', '')
+            try:
+                log_ids = [int(i) for i in log_ids.split(',')]
+                if len(log_ids) > 1000:
+                    raise Exception('log-ids不能超过1000个')
+            except ValueError:
+                return Response({'error': 'log-id为int'}, status=status.HTTP_400_BAD_REQUEST)
+        if not log_ids:
+            return Response({'error': 'log-ids不能为空'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            log_ids = [int(i) for i in log_ids.split(',')]
-            if len(log_ids) > 1000:
-                raise Exception('log-ids不能超过1000个')
+            return Response(retry_from_log_ids(log_ids))
         except Exception as e:
-            return JsonResponse({'error': 'logs_ids参数错误: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            result = {x: 'no such log' for x in log_ids}
-            related = get_model_related(ScheduleLogModel, excludes=[UserModel, CommonCategory])
-            logs = ScheduleLogModel.objects.filter(id__in=log_ids).select_related(*related)
-            for log in logs:
-                schedule = log.schedule
-                queue = builtins.schedule_queues[log.queue].queue
-                schedule.next_schedule_time = log.schedule_time
-                schedule.generator = 'retry'
-                schedule.last_log = log.result
-                schedule.queue = log.queue
-                data = ScheduleSerializer(schedule).data
-                queue.put(data)
-                result[log.id] = log.queue
-            return JsonResponse(result)
-        except Exception as e:
-            return JsonResponse({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': '重试失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
     @csrf_exempt
+    @api_view(["GET", 'POST'])
     def put(request: Request):
-        schedule_ids = request.GET.get('i', None) or request.POST.get('i', None)
-        queues = request.GET.get('q', None) or request.POST.get('q', None)
-        schedule_times = request.GET.get('t', None) or request.POST.get('t', None)
-        if not schedule_ids or not queues or not schedule_times:
-            return JsonResponse({'error': 'schedule_ids(i)、queues(q)、schedule_times(t)不能为空'},
-                                status=status.HTTP_400_BAD_REQUEST)
+        data: List[List[str, str, str]] = request.data
+        records = {}
         try:
-            schedule_ids = [int(i) for i in schedule_ids.split(',')]
-            queues = [i.strip() for i in queues.split(',')]
-            schedule_times = [datetime.strptime(i, '%Y-%m-%d %H:%M:%S') for i in schedule_times.split(',')]
-            assert len(schedule_ids) <= 1000, '不能超过1000个'
-            if len(queues) == 1:
-                q = queues[0]
-                queues = [q for _ in schedule_ids]
-            elif len(queues) != len(schedule_ids):
-                raise Exception('ids和queues长度不一致')
-            if len(schedule_times) == 1:
-                t = schedule_times[0]
-                schedule_times = [t for _ in schedule_ids]
-            elif len(schedule_times) != len(schedule_ids):
-                raise Exception('ids和schedule_times长度不一致')
+            if not data:
+                data = [request.query_params.get('data', '').split(',')]
+            for i, q, t in data:
+                records.setdefault(i, {}).setdefault(q, []).append(datetime.strptime(t, '%Y%m%d%H%M%S'))
         except Exception as e:
-            return JsonResponse({'error': 'ids参数错误: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'data参数错误: %s, 参数格式: %s' % (e, '[[schedule_id, queue, schedule_time]]')},
+                            status=status.HTTP_400_BAD_REQUEST)
         try:
-            schedules = ScheduleModel.objects.filter(id__in=set(schedule_ids))
-            schedule_mapping = {x.id: x for x in schedules}
-            result = {}
-            for i, q, t in zip(schedule_ids, queues, schedule_times):
-                queue_instance = builtins.schedule_queues.get(q, None)
-                if queue_instance is None:
-                    result[q] = 'no such queue: %s' % q
-                    continue
-                queue_result = result.setdefault(q, {})
-                schedule = schedule_mapping.get(i, None)
-                if schedule is None:
-                    queue_result[i] = 'no such schedule: %s' % i
-                    continue
-                schedule_result = queue_result.setdefault(i, [])
-                schedule.next_schedule_time = t
-                schedule.generator = 'put'
-                schedule.queue = q
-                data = ScheduleSerializer(schedule).data
-                queue_instance.queue.put(data)
-                schedule_result.append(t.strftime('%Y-%m-%d %H:%M:%S'))
-            return JsonResponse(result)
+            return Response(put_schedules(records))
         except Exception as e:
-            return JsonResponse({'error': '添加到队列失败: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'put failed: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
+    @api_view(['GET'])
     def status(request):
-        return JsonResponse({x: y.queue.qsize() for x, y in builtins.schedule_queues.items()})
+        return Response({x: y.queue.qsize() for x, y in builtins.schedule_queues.items()})
 
     @staticmethod
     def get_missing_schedules(request):
@@ -235,7 +236,13 @@ class ScheduleAPI:
         missing = []
         for pk, target in missing_result.items():
             missing.extend(target)
-        return JsonResponse(ScheduleSerializer(missing, many=True).data)
+        return Response(ScheduleSerializer(missing, many=True).data)
+
+
+class ScheduleBuiltinHandle(APIView):
+
+    def get(self, name):
+        pass
 
 
 class ScheduleProduceView(APIView):
@@ -297,7 +304,7 @@ class ScheduleTimeParseView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class TaskClientView:
+class ScheduleClientView:
 
     @staticmethod
     def show_logs(request: Request, client_id: int):
@@ -311,15 +318,26 @@ class TaskClientView:
         return HttpResponse(logs, content_type='text/plain; charset=utf-8')
 
     @staticmethod
-    def stop_process(request: Request, client_id: int):
+    @api_view(['GET'])
+    def start_client():
+        try:
+            client = TaskClient.objects.create()
+            return Response('TaskClient(%s)启动成功' % client.id)
+        except Exception as e:
+            return Response('启动TaskClient失败: %s' % e, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @staticmethod
+    @api_view(['GET'])
+    def stop_client(request: Request, client_id: int):
         client = TaskClient.objects.get(pk=client_id)
         if client is None:
-            return HttpResponse('TaskClient(%s)不存在' % client_id)
+            return Response('TaskClient(%s)不存在' % client_id, status=status.HTTP_404_NOT_FOUND)
         try:
             client.delete()
-            return HttpResponse('TaskClient(%s)已停止' % client_id)
+            return Response('TaskClient(%s)已停止' % client_id)
         except Exception as e:
-            return HttpResponse('停止TaskClient(%s)失败: %s' % (client_id, e))
+            return Response('停止TaskClient(%s)失败: %s' % (client_id, e),
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TaskListView(UserListAPIView):
@@ -337,7 +355,7 @@ class ScheduleListView(UserListAPIView):
     serializer_class = serializers.ScheduleSerializer
 
 
-class ScheduleDetailView(UserRetrieveAPIView):
+class ScheduleDetailView(RetrieveAPIView):
     queryset = ScheduleModel.objects.all()
     serializer_class = serializers.ScheduleSerializer
 
@@ -353,14 +371,5 @@ class ExceptionReportView(CreateAPIView):
 
     def perform_create(self, serializer):
         meta = self.request.META
-        group = self.request.POST.get('group')
-        if not group:
-            url_name = self.request.stream.resolver_match.url_name
-            if url_name == 'exception-report':
-                group = 'user'
-            elif url_name == 'exception-report':
-                group = 'system'
-            else:
-                group = url_name
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
-        serializer.save(ip=ip, group=group)
+        serializer.save(ip=ip)
