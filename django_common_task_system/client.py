@@ -108,3 +108,11 @@ def start_client(client):
     except Exception as e:
         client.startup_status = TaskClientStatus.FAILED
         client.startup_log = str(e)
+
+
+def start_system_client():
+    from django_common_task_system.builtins import builtins
+    from django_common_task_system.system_task_execution import main
+    p = Process(target=main.start_system_client, args=(builtins.schedule_queues.system.queue, ), daemon=True)
+    p.start()
+    print()

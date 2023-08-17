@@ -12,7 +12,7 @@ class Command(runserver.Command):
         import os
         os.environ['DJANGO_SERVER_ADDRESS'] = "%(protocol)s://%(addr)s:%(port)s" % {
             'protocol': self.protocol,
-            'addr': self.addr,
+            'addr': self.addr.replace('0.0.0.0', '127.0.0.1'),
             'port': self.port
         }
         super().run(**options)

@@ -47,6 +47,7 @@ class ScheduleQueueModule(TextChoices):
     PRIORITY_QUEUE = "%s.%s" % (queue.PriorityQueue.__module__, queue.PriorityQueue.__name__), '优先级队列'
     SIMPLE_QUEUE = "%s.%s" % (queue.SimpleQueue.__module__, queue.SimpleQueue.__name__), '简单队列'
     REDIS_LIST_QUEUE = "django_common_task_system.queue.RedisListQueue", 'Redis List队列'
+    MULTIPROCESS_QUEUE = "multiprocessing.Queue", '多进程队列'
 
 
 class PermissionType(TextChoices):
@@ -78,6 +79,7 @@ class ExecuteStatus(TextChoices):
     RUNNING = 'R', '运行中'
     SUCCEED = 'S', '运行成功'
     EMPTY = 'E', '执行成功了，但是没有日志'
+    NO_RETRY = 'N', '无重试的异常'
     EXCEPTION = 'X', '运行异常'
     FAILED = 'F', '任务失败, 无需重试'
     TIMEOUT = 'T', '超时'

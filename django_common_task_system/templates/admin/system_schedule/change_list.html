@@ -102,7 +102,15 @@
             if(time.split(':').length === 2){
                 time = time + ':00'
             }
-            const url = base_url + '&t=' + date.replaceAll('/', '-') + ' ' + time;
+            let split_date = date.replaceAll('/', '-').split('-');
+            if(split_date[1].length === 1){
+                split_date[1] = '0' + split_date[1];
+            }
+            if(split_date[2].length === 1){
+                split_date[2] = '0' + split_date[2];
+            }
+            date = split_date.join('');
+            const url = base_url + date + time.replaceAll(':', '');
             $.ajax({
                 url: url,
                 dataType: 'json',

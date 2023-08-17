@@ -110,6 +110,12 @@ class ScheduleQueues(BuiltinModels):
             module=ScheduleQueueModule.FIFO.value,
             name='已启用任务',
         )
+        self.system = self.model(
+            code='system',
+            status=True,
+            module=ScheduleQueueModule.MULTIPROCESS_QUEUE.value,
+            name='系统任务',
+        )
         self.test = self.model(
             code=self.status_params_mapping[ScheduleStatus.TEST.value],
             status=True,
@@ -129,6 +135,7 @@ class ScheduleQueues(BuiltinModels):
             if not old or old.module != instance.module or old.config != instance.config:
                 instance.queue = import_string(instance.module)(**instance.config)
                 self[instance.code] = instance
+                self.__dict__[instance.code] = instance
         elif not instance.status:
             self.pop(instance.code, None)
 

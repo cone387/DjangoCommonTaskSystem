@@ -170,7 +170,7 @@ def get_failed_directly_records(queue, start_time=None, end_time=None):
     return queryset
 
 
-def get_retry_records(queue, start_time=None, end_time=None):
+def get_retryable_records(queue, start_time=None, end_time=None, max_retry_times=5):
     # lt = less than    gt = greater than
     # lt = less than    gt = greater than
     ScheduleLog = get_schedule_log_model()
@@ -186,6 +186,6 @@ def get_retry_records(queue, start_time=None, end_time=None):
         log_id=Max('id'),
         latest_time=Max('create_time'),
     ).filter(
-        times__lt=5,
+        times__lt=max_retry_times,
     ).order_by('schedule_id', 'schedule_time')
     return queryset

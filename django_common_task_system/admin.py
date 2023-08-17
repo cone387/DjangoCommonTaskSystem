@@ -207,7 +207,7 @@ class ScheduleAdmin(BaseAdmin):
 
     def put(self, obj):
         now = datetime.now()
-        url = reverse(self.schedule_put_name) + '?i=%s' % obj.id
+        url = reverse(self.schedule_put_name) + '?data=%s' % obj.id
         templates = '''
             <div style="padding: 10px; border-bottom: 1px solid black">
                 <div>
@@ -219,7 +219,7 @@ class ScheduleAdmin(BaseAdmin):
             </div>
         ''' % (now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S'))
         for queue in self.get_available_queues(obj):
-            queue_url = url + '&q=%s' % queue.code
+            queue_url = url + ',%s,' % queue.code
             templates += """
                 <li>
                     <a href="javascript:void(0);" onclick="put_schedule('%s', %s)"><div>%s</div></a>

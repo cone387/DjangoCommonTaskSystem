@@ -20,7 +20,7 @@ from rest_framework.request import Request
 from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
 from .choices import TaskClientStatus, ScheduleStatus
-from .client import start_client
+from .client import start_system_client, start_client
 from .models import TaskClient
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
@@ -29,23 +29,23 @@ from .schedule import backend as schedule_backend
 from typing import List, Dict, Union
 import os
 import signal
-import json
 
 
-UserModel = models.UserModel
-TaskModel: models.Task = get_task_model()
-ScheduleModel: models.Schedule = get_schedule_model()
-ScheduleLogModel: models.ScheduleLog = get_schedule_log_model()
+User = models.UserModel
+Task: models.Task = get_task_model()
+Schedule: models.Schedule = get_schedule_model()
+ScheduleLog: models.ScheduleLog = get_schedule_log_model()
 ScheduleSerializer = get_schedule_serializer()
 
 
 @receiver(system_initialized_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
-    thread = schedule_backend.TaskScheduleThread(
-        schedule_model=ScheduleModel,
-        schedule_serializer=ScheduleSerializer
-    )
-    thread.start()
+    # thread = schedule_backend.TaskScheduleThread(
+    #     schedule_model=Schedule,
+    #     schedule_serializer=ScheduleSerializer
+    # )
+    # thread.start()
+    start_system_client()
 
 
 def on_system_shutdown(signum, frame):
@@ -56,22 +56,22 @@ def on_system_shutdown(signum, frame):
 
 @receiver(post_delete, sender=models.ScheduleQueue)
 def delete_queue(sender, instance: models.ScheduleQueue, **kwargs):
-    builtins.queues.delete(instance)
+    builtins.schedule_queues.delete(instance)
 
 
 @receiver(post_save, sender=models.ScheduleQueue)
 def add_queue(sender, instance: models.ScheduleQueue, created, **kwargs):
-    builtins.queues.add(instance)
+    builtins.schedule_queues.add(instance)
 
 
 @receiver(post_save, sender=models.ScheduleProducer)
 def add_producer(sender, instance: models.ScheduleProducer, created, **kwargs):
-    builtins.producers.add(instance)
+    builtins.schedule_producers.add(instance)
 
 
 @receiver(post_delete, sender=models.ScheduleProducer)
 def delete_producer(sender, instance: models.ScheduleProducer, **kwargs):
-    builtins.producers.delete(instance)
+    builtins.schedule_producers.delete(instance)
 
 
 @receiver(post_save, sender=models.ScheduleQueuePermission)
@@ -84,8 +84,8 @@ def delete_schedule_queue_permission(sender, instance: models.ScheduleQueuePermi
     builtins.schedule_queue_permissions.delete(instance)
 
 
-@receiver(post_delete, sender=TaskModel)
-def delete_task(sender, instance: TaskModel, **kwargs):
+@receiver(post_delete, sender=Task)
+def delete_task(sender, instance: Task, **kwargs):
     if instance.config:
         f = instance.config.get('executable_file')
         if f and os.path.exists(f):
@@ -115,8 +115,8 @@ for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), get
 
 def retry_from_log_ids(log_ids: List[int]):
     result = {x: 'no such log' for x in log_ids}
-    related = get_model_related(ScheduleLogModel, excludes=[UserModel, CommonCategory])
-    logs = ScheduleLogModel.objects.filter(id__in=log_ids).select_related(*related)
+    related = get_model_related(ScheduleLog, excludes=[User, CommonCategory])
+    logs = ScheduleLog.objects.filter(id__in=log_ids).select_related(*related)
     for log in logs:
         schedule = log.schedule
         queue = builtins.schedule_queues[log.queue].queue
@@ -134,7 +134,7 @@ ScheduleRecord = Dict[str, Dict[str, List[str]]]
 
 
 def put_schedules(records: ScheduleRecord):
-    schedules = ScheduleModel.objects.filter(id__in=records.keys())
+    schedules = Schedule.objects.filter(id__in=records.keys())
     schedule_mapping = {str(x.id): x for x in schedules}
     result: Dict[str, Union[Dict[str, str], str]] = {}
     for schedule_id, record in records.items():
@@ -220,6 +220,24 @@ class ScheduleAPI:
             return Response({'error': 'put failed: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
+    @csrf_exempt
+    @api_view(['POST'])
+    def put_raw(request: Request):
+        schedules: List[Dict] = request.data['schedules']
+        queue = request.data['queue']
+        queue_instance = getattr(builtins.schedule_queues.get(queue, None), 'queue', None)
+        if queue_instance is None:
+            return Response({'error': '队列(%s)不存在' % queue}, status=status.HTTP_404_NOT_FOUND)
+        check_fields = ['schedule_time', 'task', 'id', 'queue']
+        for i, schedule in enumerate(schedules):
+            for field in check_fields:
+                if schedule.get(field) is None:
+                    return Response({'error': '第%s个schedule缺少%s字段' % (i, field)}, status=status.HTTP_400_BAD_REQUEST)
+        for schedule in schedules:
+            queue_instance.put(schedule)
+        return Response({'message': 'put %s schedules to %s' % (len(schedules), queue)})
+
+    @staticmethod
     @api_view(['GET'])
     def status(request):
         return Response({x: y.queue.qsize() for x, y in builtins.schedule_queues.items()})
@@ -229,9 +247,9 @@ class ScheduleAPI:
         schedule_id = request.GET.get('schedule_id')
         is_strict = request.GET.get('strict', '1') == '1'
         if schedule_id:
-            schedules = ScheduleModel.objects.filter(id=schedule_id, status=ScheduleStatus.OPENING.value)
+            schedules = Schedule.objects.filter(id=schedule_id, status=ScheduleStatus.OPENING.value)
         else:
-            schedules = ScheduleModel.objects.filter(is_strict=is_strict, status=ScheduleStatus.OPENING.value)
+            schedules = Schedule.objects.filter(is_strict=is_strict, status=ScheduleStatus.OPENING.value)
         missing_result = schedule_util.get_missing_schedules(schedules)
         missing = []
         for pk, target in missing_result.items():
@@ -249,8 +267,8 @@ class ScheduleProduceView(APIView):
 
     def post(self, request: Request, pk: int):
         try:
-            schedule = ScheduleModel.objects.select_related('task').get(id=pk)
-        except ScheduleModel.DoesNotExist:
+            schedule = Schedule.objects.select_related('task').get(id=pk)
+        except Schedule.DoesNotExist:
             return Response({'message': 'schedule_id(%s)不存在' % pk}, status=status.HTTP_404_NOT_FOUND)
         sql: str = schedule.task.config.get('script', '').strip()
         if not sql:
@@ -341,27 +359,27 @@ class ScheduleClientView:
 
 
 class TaskListView(UserListAPIView):
-    queryset = TaskModel.objects.all()
+    queryset = Task.objects.all()
     serializer_class = serializers.TaskSerializer
 
 
 class TaskDetailView(UserRetrieveAPIView):
-    queryset = TaskModel.objects.all()
+    queryset = Task.objects.all()
     serializer_class = serializers.TaskSerializer
 
 
 class ScheduleListView(UserListAPIView):
-    queryset = ScheduleModel.objects.all()
+    queryset = Schedule.objects.all()
     serializer_class = serializers.ScheduleSerializer
 
 
 class ScheduleDetailView(RetrieveAPIView):
-    queryset = ScheduleModel.objects.all()
+    queryset = Schedule.objects.all()
     serializer_class = serializers.ScheduleSerializer
 
 
 class ScheduleLogViewSet(ModelViewSet):
-    queryset = ScheduleLogModel.objects.all()
+    queryset = ScheduleLog.objects.all()
     serializer_class = serializers.ScheduleLogSerializer
 
 

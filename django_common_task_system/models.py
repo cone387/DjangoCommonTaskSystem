@@ -19,7 +19,6 @@ from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
 from docker.models.containers import Container
-from typing import Dict
 import os
 import re
 

@@ -13,6 +13,7 @@ urlpatterns = [
     path('schedule/list/', views.ScheduleListView.as_view()),
     path('schedule/retry/', views.ScheduleAPI.retry, name='schedule-retry'),
     path('schedule/put/', views.ScheduleAPI.put, name='schedule-put'),
+    path('schedule/put-raw/', views.ScheduleAPI.put_raw, name='schedule-put-raw'),
     path('schedule/get/<int:pk>/', views.ScheduleDetailView.as_view()),
     path('schedule/builtin/handle/<slug:name>/', views.ScheduleBuiltinHandle.as_view(), name='schedule-builtin-handle'),
     path('schedule/queue/get/<slug:code>/', views.ScheduleAPI.get, name='schedule-get'),
