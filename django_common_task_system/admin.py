@@ -10,11 +10,13 @@ from django.urls import resolve
 import docker
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
+from django_common_task_system import client as schedule_client
+from django_common_task_system.schedule import util as schedule_util
 from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
 from . import models
-from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason
-
+from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
+    ScheduleStatus, ExecuteStatus
 
 UserModel = models.UserModel
 Task: models.Task = get_task_model()
@@ -136,7 +138,6 @@ class ScheduleAdmin(BaseAdmin):
     schedule_put_name = 'schedule-put'
     list_display = ('id', 'admin_task', 'schedule_type', 'schedule_sub_type', 'next_schedule_time',
                     'status', 'strict', 'put', 'logs', 'update_time')
-    change_list_template = ['admin/system_schedule/change_list.html']
     # readonly_fields = ("next_schedule_time", )
     form = forms.ScheduleForm
     list_filter = ('status', 'is_strict', 'task__category')
@@ -603,6 +604,82 @@ class RetryScheduleAdmin(ExceptionScheduleAdmin):
         return models.ExceptionSchedule.objects.get_retry_queryset(queue, pk)
 
 
+class OverviewAdmin(admin.ModelAdmin):
+    actions = None
+    list_display = ('name', 'state', 'admin_action')
+
+    def get_list_display_links(self, request, list_display):
+        return []
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def admin_action(self, obj: models.Overview):
+        action = getattr(self, 'action_%s' % obj.action, None)
+        if action:
+            return format_html(action(obj))
+        return ''
+    admin_action.short_description = '操作'
+
+    @staticmethod
+    def action_client(obj: models.Overview):
+        log_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">查看日志</a>' % (
+            Schedule._meta.model_name,
+            obj.state
+        )
+        stop_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">停止</a>' % (
+            Schedule._meta.model_name,
+            obj.state
+        )
+        start_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">开启</a>' % (
+            Schedule._meta.model_name,
+            obj.state
+        )
+        restart_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">重启</a>' % (
+            Schedule._meta.model_name,
+            obj.state
+        )
+        if obj.state:
+            return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action, restart_action])
+        else:
+            return start_action
+
+    @staticmethod
+    def action_enabled_schedule(obj: models.Overview):
+        return '<a href="/admin/django_common_task_system/%s/?status__exact=%s" target="_blank">查看详情</a>' % (
+            Schedule._meta.model_name,
+            ScheduleStatus.OPENING
+        )
+
+    @staticmethod
+    def action_failed_schedule(obj: models.Overview):
+        return '<a href="/admin/django_common_task_system/%s/?status__exact=%s" target="_blank">查看详情</a>' % (
+            ScheduleLog._meta.model_name,
+            ExecuteStatus.FAILED
+        )
+
+    def get_queryset(self, request):
+        model = models.Overview
+        model.objects['client'] = model(
+            name="系统计划处理进程ID",
+            state=getattr(schedule_client.current_process(), 'pid', None)
+        )
+        model.objects['enabled_schedule'] = model(
+            name="已启用计划数量",
+            state=Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
+        )
+        failed_count = schedule_util.get_failed_directly_records('opening').count() + schedule_util.\
+            get_maximum_retries_exceeded_records('opening').count()
+        model.objects['failed_schedule'] = model(
+            name="失败计划数量",
+            state=failed_count,
+        )
+        for k, v in model.objects.items():
+            v.action = k
+        return model.objects.all()
+
+
+admin.site.register(models.Overview, OverviewAdmin)
 admin.site.register(Task, TaskAdmin)
 admin.site.register(Schedule, ScheduleAdmin)
 admin.site.register(models.ScheduleCallback, ScheduleCallbackAdmin)

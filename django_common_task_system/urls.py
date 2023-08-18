@@ -15,12 +15,20 @@ urlpatterns = [
     path('schedule/put/', views.ScheduleAPI.put, name='schedule-put'),
     path('schedule/put-raw/', views.ScheduleAPI.put_raw, name='schedule-put-raw'),
     path('schedule/get/<int:pk>/', views.ScheduleDetailView.as_view()),
-    path('schedule/builtin/handle/<slug:name>/', views.ScheduleBuiltinHandle.as_view(), name='schedule-builtin-handle'),
     path('schedule/queue/get/<slug:code>/', views.ScheduleAPI.get, name='schedule-get'),
     path('schedule/queue/status/', views.ScheduleAPI.status, name='schedule-status'),
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
+
+    path('client/system/<slut:action>/', views.ScheduleClientView.system_action, name='schedule-client-action'),
+    path('client/<slut:action>/', views.ScheduleClientView.action, name='schedule-client-action'),
+
+
     path('client/log/<int:client_id>/', views.ScheduleClientView.show_logs, name='schedule-client-log'),
     path('client/start/', views.ScheduleClientView.start_client, name='schedule-client-start'),
     path('client/stop/<int:client_id>/', views.ScheduleClientView.stop_client, name='schedule-client-stop'),
+
+    path('client/system/log/', views.ScheduleClientView.show_system_process_logs, name='system-system-log'),
+    path('client/system/start/', views.ScheduleClientView.start_system_process, name='system_process-start'),
+    path('client/system/stop/', views.ScheduleClientView.stop_system_process, name='system-process-stop'),
 ] + router.urls

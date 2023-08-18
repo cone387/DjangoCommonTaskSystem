@@ -30,6 +30,13 @@ class EmptyResult(Exception):
         return ExecuteStatus.EMPTY.value
 
 
+class PartialFailed(Exception):
+
+    @property
+    def status(self):
+        return ExecuteStatus.PARTIAL_FAILED.value
+
+
 class Failed(Exception):
 
     @property
@@ -104,8 +111,12 @@ class BaseExecutor(object):
         try:
             log.result['result'] = self.execute()
         except EmptyResult as e:
-            log.status = getattr(e, 'status',  ExecuteStatus.EXCEPTION.value)
-            log.result['msg'] = traceback.format_exc()
+            if hasattr(e, 'status'):
+                log.status = e.status
+                log.result['msg'] = str(e)
+            else:
+                log.status = ExecuteStatus.EXCEPTION
+                log.result['msg'] = traceback.format_exc()
         try:
             log.save()
         except Exception as e:
@@ -122,7 +133,12 @@ class _Executor(dict):
         return executor(schedule)
 
     def register(self, func_or_class: BaseExecutor):
-        self[func_or_class.name] = func_or_class
+        if func_or_class.name:
+            self[func_or_class.name] = func_or_class
+        elif func_or_class.parent:
+            self[func_or_class.parent] = func_or_class
+        else:
+            raise ValueError('Executor must have name or parent')
         return func_or_class
 
 

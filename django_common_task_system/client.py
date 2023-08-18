@@ -2,6 +2,8 @@ from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
 from django_common_task_system.choices import TaskClientStatus
 from docker.errors import APIError
+from typing import Union
+from threading import Lock
 import os
 import subprocess
 import logging
@@ -10,6 +12,13 @@ import docker
 
 
 SYS_ENCODING = locale.getpreferredencoding()
+
+_current_process: Union[Process, None] = None
+_current_process_lock = Lock()
+
+
+def current_process() -> Union[Process, None]:
+    return _current_process
 
 
 def run_in_subprocess(cmd):
@@ -110,9 +119,52 @@ def start_client(client):
         client.startup_log = str(e)
 
 
-def start_system_client():
-    from django_common_task_system.builtins import builtins
-    from django_common_task_system.system_task_execution import main
-    p = Process(target=main.start_system_client, args=(builtins.schedule_queues.system.queue, ), daemon=True)
-    p.start()
-    print()
+def start_system_process() -> str:
+    global _current_process, _current_process_lock
+    error = ''
+    if _current_process is not None:
+        error = 'process already started'
+    else:
+        lock = _current_process_lock.acquire(blocking=False)
+        if not lock:
+            error = 'another process is starting'
+        else:
+            from django_common_task_system.builtins import builtins
+            from django_common_task_system.system_task_execution import main
+            set_start_method('spawn', True)
+            try:
+                _current_process = Process(target=main.start_system_client, args=(builtins.schedule_queues.system.queue, ),
+                                           daemon=True)
+                _current_process.start()
+            except Exception as e:
+                error = str(e)
+            finally:
+                _current_process_lock.release()
+    return error
+
+
+def stop_system_process():
+    global _current_process
+    error = ''
+    if _current_process is None:
+        error = 'process not started'
+    else:
+        lock = _current_process_lock.acquire(blocking=False)
+        if not lock:
+            error = 'another process is processing'
+        else:
+            try:
+                _current_process.kill()
+                _current_process = None
+            except Exception as e:
+                error = str(e)
+            finally:
+                _current_process_lock.release()
+    return error
+
+
+def restart_system_process():
+    error = stop_system_process()
+    if not error:
+        error = start_system_process()
+    return error

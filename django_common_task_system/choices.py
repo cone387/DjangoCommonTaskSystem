@@ -81,6 +81,7 @@ class ExecuteStatus(TextChoices):
     EMPTY = 'E', '执行成功了，但是没有日志'
     NO_RETRY = 'N', '无重试的异常'
     EXCEPTION = 'X', '运行异常'
+    PARTIAL_FAILED = 'P', '部分失败'
     FAILED = 'F', '任务失败, 无需重试'
     TIMEOUT = 'T', '超时'
 

@@ -8,7 +8,7 @@ from django_common_task_system.choices import (
 )
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
@@ -449,7 +449,7 @@ class ExceptionScheduleManager(CustomManager):
         return QuerySet(queryset, self.model)
 
     def get_retry_queryset(self, queue: str, schedule_pk) -> QuerySet:
-        records = schedule_util.get_retry_records(queue)
+        records = schedule_util.get_retryable_records(queue)
         if schedule_pk:
             schedule = Schedule.objects.get(id=schedule_pk)
             records = records.filter(schedule=schedule)
@@ -543,3 +543,48 @@ class RetrySchedule(ExceptionSchedule):
         managed = False
         verbose_name = verbose_name_plural = '待重试计划'
         ordering = ('id', '-schedule_time',)
+
+
+class OverviewManager(CustomManager):
+
+    def statistics(self):
+        self['client'] = Overview(
+            name="系统计划处理进程ID",
+            state=schedule_client.current_process().pid,
+            action="""
+                
+            """
+        )
+        self['schedule'] = Overview(
+            name="已启用计划数量",
+            state=Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
+            action="""
+                <a href="/admin/schedule/schedule/?status=opening">查看详情</a>
+            """
+        )
+        failed_count = schedule_util.get_failed_directly_records('opening').count() + \
+                       schedule_util.get_maximum_retries_exceeded_records('opening').count()
+        self['failed-schedule'] = Overview(
+            name="失败计划数量",
+            state=failed_count,
+            action="""
+                <a href="/admin/schedule/exceptionschedule/?reason=failed_directly">查看详情</a>
+            """
+        )
+
+    def all(self):
+        self.statistics()
+        return QuerySet(dict.values(self), self.model)
+
+
+class Overview(models.Model):
+    name = models.CharField(max_length=100, verbose_name='名称')
+    state = models.CharField(max_length=100, verbose_name='状态')
+    action = models.CharField(max_length=100, verbose_name='操作')
+
+    objects = CustomManager()
+
+    class Meta:
+        managed = False
+        verbose_name = verbose_name_plural = '系统总览'
+        ordering = ('name',)

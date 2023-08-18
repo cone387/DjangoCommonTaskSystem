@@ -20,12 +20,11 @@ from rest_framework.request import Request
 from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
 from .choices import TaskClientStatus, ScheduleStatus
-from .client import start_system_client, start_client
 from .models import TaskClient
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
-from .schedule import backend as schedule_backend
+from . import client as schedule_client
 from typing import List, Dict, Union
 import os
 import signal
@@ -40,12 +39,7 @@ ScheduleSerializer = get_schedule_serializer()
 
 @receiver(system_initialized_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
-    # thread = schedule_backend.TaskScheduleThread(
-    #     schedule_model=Schedule,
-    #     schedule_serializer=ScheduleSerializer
-    # )
-    # thread.start()
-    start_system_client()
+    schedule_client.start_system_process()
 
 
 def on_system_shutdown(signum, frame):
@@ -97,7 +91,7 @@ def delete_task(sender, instance: Task, **kwargs):
 
 @receiver(post_save, sender=models.TaskClient)
 def add_client(sender, instance: models.TaskClient, created, **kwargs):
-    thread = Thread(target=start_client, args=(instance,))
+    thread = Thread(target=schedule_client.start_client, args=(instance,))
     thread.start()
 
     """
@@ -108,9 +102,9 @@ def add_client(sender, instance: models.TaskClient, created, **kwargs):
     """
 
 
-for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
-    if sig is not None:
-        signal.signal(sig, on_system_shutdown)
+# for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
+#     if sig is not None:
+#         signal.signal(sig, on_system_shutdown)
 
 
 def retry_from_log_ids(log_ids: List[int]):
@@ -257,12 +251,6 @@ class ScheduleAPI:
         return Response(ScheduleSerializer(missing, many=True).data)
 
 
-class ScheduleBuiltinHandle(APIView):
-
-    def get(self, name):
-        pass
-
-
 class ScheduleProduceView(APIView):
 
     def post(self, request: Request, pk: int):
@@ -325,6 +313,18 @@ class ScheduleTimeParseView(APIView):
 class ScheduleClientView:
 
     @staticmethod
+    @api_view(['GET'])
+    def action(request: Request, action: str):
+        if action == 'start':
+            return ScheduleClientView.start_client()
+        elif action == 'stop':
+            return ScheduleClientView.stop_client()
+        elif action == 'log':
+            return ScheduleClientView.show_logs(request)
+        else:
+            return HttpResponse('invalid action: %s' % action)
+
+    @staticmethod
     def show_logs(request: Request, client_id: int):
         # 此处pk为进程id
         client: TaskClient = TaskClient.objects.get(client_id)
@@ -356,6 +356,56 @@ class ScheduleClientView:
         except Exception as e:
             return Response('停止TaskClient(%s)失败: %s' % (client_id, e),
                             status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @staticmethod
+    @api_view(['GET'])
+    def system_action(request: Request, action: str):
+        if action == 'start':
+            return ScheduleClientView.start_system_process()
+        elif action == 'stop':
+            return ScheduleClientView.stop_system_process()
+        elif action == 'log':
+            return ScheduleClientView.show_system_process_logs(request)
+        elif action == 'restart':
+            return ScheduleClientView.restart_system_process()
+        else:
+            return HttpResponse('invalid action: %s' % action)
+
+    @staticmethod
+    @api_view(['GET'])
+    def start_system_process(request: Request):
+        error = schedule_client.start_system_process()
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"msg": "启动成功", "process": schedule_client.current_process().pid})
+
+    @staticmethod
+    @api_view(['GET'])
+    def stop_system_process(request: Request):
+        pid = getattr(schedule_client.current_process(), 'pid', None)
+        error = schedule_client.stop_system_process()
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"msg": "进程(%s)停止成功" % pid})
+
+    @staticmethod
+    @api_view(['GET'])
+    def restart_system_process(request: Request):
+        error = schedule_client.restart_system_process()
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"msg": "重启成功", "process": schedule_client.current_process().pid})
+
+    @staticmethod
+    @api_view(['GET'])
+    def show_system_process_logs(request: Request):
+        process = schedule_client.current_process()
+        if process is None:
+            return Response('系统进程未启动')
+        try:
+            return Response(process.logs())
+        except Exception as e:
+            return Response('获取系统进程日志失败: %s' % e, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class TaskListView(UserListAPIView):

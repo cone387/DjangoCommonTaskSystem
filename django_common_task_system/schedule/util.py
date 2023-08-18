@@ -3,7 +3,7 @@ from datetime import datetime
 from dateutil import parser
 from django.db.models import Count, Max
 from django_common_task_system.choices import ExecuteStatus
-from django_common_task_system import get_schedule_log_model, get_schedule_model
+from django_common_task_system import get_schedule_log_model
 from .config import ScheduleConfig
 import copy
 
@@ -140,7 +140,10 @@ def get_missing_schedules_mapping(queue, schedules,
 
 def get_maximum_retries_exceeded_records(queue, start_time=None, end_time=None, max_retry_times=5):
     ScheduleLog = get_schedule_log_model()
-    queryset = ScheduleLog.objects.filter(status__in=['X', 'T'], queue=queue)
+    queryset = ScheduleLog.objects.filter(status__in=[
+        ExecuteStatus.EXCEPTION.value,
+        ExecuteStatus.TIMEOUT.value
+    ], queue=queue)
     if start_time:
         queryset = queryset.filter(create_time__gte=start_time)
     if end_time:
@@ -174,7 +177,10 @@ def get_retryable_records(queue, start_time=None, end_time=None, max_retry_times
     # lt = less than    gt = greater than
     # lt = less than    gt = greater than
     ScheduleLog = get_schedule_log_model()
-    queryset = ScheduleLog.objects.filter(status__in=['X', 'T'], queue=queue)
+    queryset = ScheduleLog.objects.filter(status__in=[
+        ExecuteStatus.EXCEPTION.value,
+        ExecuteStatus.TIMEOUT.value
+    ], queue=queue)
     if start_time:
         queryset = queryset.filter(create_time__gte=start_time)
     if end_time:

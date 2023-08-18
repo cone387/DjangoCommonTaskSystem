@@ -5,7 +5,7 @@ from django_common_task_system.choices import ScheduleTimingType
 
 
 class CustomProgramWidget(forms.MultiWidget):
-    template_name = 'task_schedule/custom_program.html'
+    template_name = 'schedule/custom_program.html'
 
     def __init__(self, attrs=None):
         file = widgets.AdminFileWidget()
@@ -50,7 +50,7 @@ class CustomProgramField(forms.MultiValueField):
 
 
 class SqlConfigWidget(forms.MultiWidget):
-    template_name = 'task_schedule/sql_config.html'
+    template_name = 'schedule/sql_config.html'
 
     def __init__(self, attrs=None):
         host = widgets.AdminTextInputWidget()
@@ -98,7 +98,7 @@ class SqlConfigField(forms.MultiValueField):
 
 
 class DateTimeRangeWidget(forms.widgets.MultiWidget):
-    template_name = 'task_schedule/datetime_range.html'
+    template_name = 'schedule/datetime_range.html'
 
     def __init__(self, attrs=None):
         st = widgets.AdminSplitDateTime()
@@ -118,7 +118,7 @@ class DateTimeRangeWidget(forms.widgets.MultiWidget):
 
 
 class PeriodWidget(widgets.AdminIntegerFieldWidget):
-    template_name = 'task_schedule/period.html'
+    template_name = 'schedule/period.html'
 
     def __init__(self, unit=ScheduleTimingType.DAY.value, attrs=None):
         self.unit = unit
@@ -170,7 +170,7 @@ class MultiWeekdaySelectFiled(forms.MultipleChoiceField):
 
 
 class PeriodScheduleWidget(forms.MultiWidget):
-    template_name = 'task_schedule/period_schedule.html'
+    template_name = 'schedule/period_schedule.html'
 
     def __init__(self, default_time=datetime.now, default_period=60, attrs=None):
         ws = (
@@ -221,7 +221,7 @@ class OnceScheduleField(forms.SplitDateTimeField):
 
 
 class MultiDaySelectWidget(forms.MultiWidget):
-    template_name = 'task_schedule/multi_day_select.html'
+    template_name = 'schedule/multi_day_select.html'
 
     def __init__(self, attrs=None):
         ws = (
@@ -305,7 +305,7 @@ class MultiMonthdaySelectFiled(forms.MultipleChoiceField):
     ]
     widget = forms.CheckboxSelectMultiple()
 
-    template_name = 'task_schedule/multi_monthday_select.html'
+    template_name = 'schedule/multi_monthday_select.html'
 
     def __init__(self, *, choices=(), label="日期", widget=None, **kwargs):
         super(MultiMonthdaySelectFiled, self).__init__(
@@ -325,7 +325,7 @@ class MultiMonthdaySelectFiled(forms.MultipleChoiceField):
 
 
 class MultiYearDaySelectWidget(forms.TextInput):
-    template_name = 'task_schedule/multi_month_day_select.html'
+    template_name = 'schedule/multi_month_day_select.html'
 
     class Media:
         css = {
@@ -335,5 +335,5 @@ class MultiYearDaySelectWidget(forms.TextInput):
 
 
 class NLPSentenceWidget(forms.TextInput):
-    template_name = 'task_schedule/nlp_input.html'
+    template_name = 'schedule/nlp_input.html'
 

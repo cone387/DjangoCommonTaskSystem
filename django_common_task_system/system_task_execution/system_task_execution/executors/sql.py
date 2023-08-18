@@ -11,7 +11,7 @@ class SQLExecutor(BaseExecutor):
 
     def execute(self):
         result = []
-        commands = self.schedule.task.config.get('script', '').split(';')
+        commands = self.schedule.task.config.get('script', '').strip().split(';')
         sql_config = self.schedule.task.config.get('sql_config') or {}
         host = sql_config.get('host')
         if host:
