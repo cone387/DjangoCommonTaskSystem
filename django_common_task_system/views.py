@@ -359,53 +359,26 @@ class ScheduleClientView:
 
     @staticmethod
     @api_view(['GET'])
-    def system_action(request: Request, action: str):
+    def system_process_action(request: Request, action: str):
         if action == 'start':
-            return ScheduleClientView.start_system_process()
+            error = schedule_client.start_system_process()
         elif action == 'stop':
-            return ScheduleClientView.stop_system_process()
+            error = schedule_client.stop_system_process()
         elif action == 'log':
-            return ScheduleClientView.show_system_process_logs(request)
+            page: str = request.query_params.get('page', '1')
+            size: str = request.query_params.get('size', '1024')
+            if page.isdigit() and size.isdigit():
+                text = schedule_client.read_system_process_log(int(page), int(size) * 1024)
+                return HttpResponse(text, content_type='text/plain; charset=utf-8')
+            return Response(f'invalid page({page}) or size({size})', status=status.HTTP_400_BAD_REQUEST)
         elif action == 'restart':
-            return ScheduleClientView.restart_system_process()
+            error = schedule_client.restart_system_process()
         else:
-            return HttpResponse('invalid action: %s' % action)
-
-    @staticmethod
-    @api_view(['GET'])
-    def start_system_process(request: Request):
-        error = schedule_client.start_system_process()
+            return Response('invalid action: %s' % action, status=status.HTTP_400_BAD_REQUEST)
         if error:
             return Response(error, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"msg": "启动成功", "process": schedule_client.current_process().pid})
-
-    @staticmethod
-    @api_view(['GET'])
-    def stop_system_process(request: Request):
-        pid = getattr(schedule_client.current_process(), 'pid', None)
-        error = schedule_client.stop_system_process()
-        if error:
-            return Response(error, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"msg": "进程(%s)停止成功" % pid})
-
-    @staticmethod
-    @api_view(['GET'])
-    def restart_system_process(request: Request):
-        error = schedule_client.restart_system_process()
-        if error:
-            return Response(error, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"msg": "重启成功", "process": schedule_client.current_process().pid})
-
-    @staticmethod
-    @api_view(['GET'])
-    def show_system_process_logs(request: Request):
-        process = schedule_client.current_process()
-        if process is None:
-            return Response('系统进程未启动')
-        try:
-            return Response(process.logs())
-        except Exception as e:
-            return Response('获取系统进程日志失败: %s' % e, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        process = getattr(schedule_client.current_process(), 'pid', None)
+        return Response({"msg": f"操作({action})成功", "process": process})
 
 
 class TaskListView(UserListAPIView):

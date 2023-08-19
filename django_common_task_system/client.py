@@ -2,6 +2,7 @@ from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
 from django_common_task_system.choices import TaskClientStatus
 from docker.errors import APIError
+from django.conf import settings
 from typing import Union
 from threading import Lock
 import os
@@ -9,6 +10,7 @@ import subprocess
 import logging
 import locale
 import docker
+import math
 
 
 SYS_ENCODING = locale.getpreferredencoding()
@@ -133,8 +135,10 @@ def start_system_process() -> str:
             from django_common_task_system.system_task_execution import main
             set_start_method('spawn', True)
             try:
-                _current_process = Process(target=main.start_system_client, args=(builtins.schedule_queues.system.queue, ),
-                                           daemon=True)
+                _current_process = Process(
+                    target=main.start_system_client,
+                    args=(builtins.schedule_queues.system.queue,
+                          os.environ.get('SYSTEM_PROCESS_LOG_FILE')), daemon=True)
                 _current_process.start()
             except Exception as e:
                 error = str(e)
@@ -168,3 +172,21 @@ def restart_system_process():
     if not error:
         error = start_system_process()
     return error
+
+
+def read_system_process_log(page=1, batch=1024 * 1024):
+
+    log_file = getattr(settings, 'SYSTEM_PROCESS_LOG_FILE', None)
+    if not log_file:
+        log = "log file not set"
+    elif not os.path.isfile(log_file):
+        log = f"logfile({log_file}) not exists"
+    else:
+        with open(log_file, 'r') as f:
+            size = f.seek(0, os.SEEK_END)
+            page_num = math.ceil(size / batch)
+            if page > page_num or page < 1:
+                return f"page({page}) out of range"
+            f.seek(batch * (page - 1), os.SEEK_SET)
+            log = f.read(batch)
+    return log

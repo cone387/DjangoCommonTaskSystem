@@ -11,19 +11,13 @@ logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 
 
-def start_system_client(queue):
+def start_system_client(queue, log_file=None):
     os.environ['RUN_CLIENT'] = 'true'
     assert os.environ.get('DJANGO_SETTINGS_MODULE'), 'django settings module not found'
     import django
     django.setup()
 
-    from django.conf import settings
-    if not hasattr(settings, 'SYSTEM_PROCESS_LOG_FILE'):
-        setattr(settings, 'SYSTEM_PROCESS_LOG_FILE', 'system-task-execution.log')
-    log_file = settings.SYSTEM_PROCESS_LOG_FILE
-
     if log_file:
-        log_file = os.path.join(os.getcwd(), 'logs', log_file)
         logger.handlers.clear()
         if not os.path.exists(os.path.dirname(log_file)):
             os.makedirs(os.path.dirname(log_file))

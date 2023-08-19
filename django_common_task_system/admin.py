@@ -203,7 +203,8 @@ class ScheduleAdmin(BaseAdmin):
         return '-'
     schedule_sub_type.short_description = '详细'
 
-    def get_available_queues(self, obj):
+    @staticmethod
+    def get_available_queues(obj):
         return builtins.schedule_queues.values()
 
     def put(self, obj):
@@ -623,22 +624,11 @@ class OverviewAdmin(admin.ModelAdmin):
 
     @staticmethod
     def action_client(obj: models.Overview):
-        log_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">查看日志</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        stop_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">停止</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        start_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">开启</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        restart_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">重启</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
+        action_url_name = 'system-process-action'
+        log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log', ))
+        stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop', ))
+        start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start', ))
+        restart_action = '<a href="%s" target="_blank">重启</a>' % reverse(action_url_name, args=('restart', ))
         if obj.state:
             return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action, restart_action])
         else:
