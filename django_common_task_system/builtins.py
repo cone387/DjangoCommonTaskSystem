@@ -166,6 +166,15 @@ class ScheduleProducers(BuiltinModels):
             status=True,
             name='测试',
         )
+        self.system = self.model(
+            queue=queues.system,
+            lte_now=True,
+            filters={
+                'status': ScheduleStatus.AUTO.value,
+            },
+            status=True,
+            name='系统',
+        )
         try:
             for m in self.model.objects.filter(status=True):
                 self.add(m)
@@ -340,6 +349,7 @@ class Schedules(BuiltinModels):
     def __init__(self, tasks: Tasks, callbacks: ScheduleCallbacks):
         self.callbacks = callbacks
         self.log_clean = self.model(
+            status=ScheduleStatus.AUTO,
             task=tasks.log_clean,
             config={
                 "T": {
@@ -356,6 +366,7 @@ class Schedules(BuiltinModels):
 
         self.exception_handle = self.model(
             task=tasks.exception_handle,
+            status=ScheduleStatus.AUTO,
             config={
                 "S": {
                     "period": 60,
@@ -408,7 +419,7 @@ class Schedules(BuiltinModels):
 
         self.strict_schedule_handle = self.model(
             task=tasks.strict_schedule_handle,
-            status=ScheduleStatus.OPENING.value,
+            status=ScheduleStatus.AUTO.value,
             config={
                 "S": {
                     "period": 60 * 60,

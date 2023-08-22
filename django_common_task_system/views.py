@@ -4,6 +4,7 @@ from threading import Thread
 from django.db import connection
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django_common_objects.models import CommonCategory
 from jionlp_time import parse_time
@@ -27,7 +28,6 @@ from . import models, system_initialized_signal
 from . import client as schedule_client
 from typing import List, Dict, Union
 import os
-import signal
 
 
 User = models.UserModel
@@ -40,6 +40,7 @@ ScheduleSerializer = get_schedule_serializer()
 @receiver(system_initialized_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
     schedule_client.start_system_process()
+    schedule_client.start_schedule_thread()
 
 
 def on_system_shutdown(signum, frame):
@@ -317,15 +318,19 @@ class ScheduleClientView:
     def action(request: Request, action: str):
         if action == 'start':
             return ScheduleClientView.start_client()
-        elif action == 'stop':
-            return ScheduleClientView.stop_client()
+        client_id = request.GET.get('client_id', '')
+        if not client_id.isdigit():
+            return Response({'error': 'invalid client_id: %s' % client_id}, status=status.HTTP_400_BAD_REQUEST)
+        if action == 'stop':
+            return ScheduleClientView.stop_client(int(client_id))
         elif action == 'log':
-            return ScheduleClientView.show_logs(request)
+            return ScheduleClientView.show_logs(int(client_id))
         else:
-            return HttpResponse('invalid action: %s' % action)
+            return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
-    def show_logs(request: Request, client_id: int):
+    def show_logs(client_id: int):
         # 此处pk为进程id
         client: TaskClient = TaskClient.objects.get(client_id)
         if client is None:
@@ -336,7 +341,10 @@ class ScheduleClientView:
         return HttpResponse(logs, content_type='text/plain; charset=utf-8')
 
     @staticmethod
-    @api_view(['GET'])
+    def report_client():
+        pass
+
+    @staticmethod
     def start_client():
         try:
             client = TaskClient.objects.create()
@@ -345,8 +353,7 @@ class ScheduleClientView:
             return Response('启动TaskClient失败: %s' % e, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @staticmethod
-    @api_view(['GET'])
-    def stop_client(request: Request, client_id: int):
+    def stop_client(client_id: int):
         client = TaskClient.objects.get(pk=client_id)
         if client is None:
             return Response('TaskClient(%s)不存在' % client_id, status=status.HTTP_404_NOT_FOUND)
@@ -365,20 +372,50 @@ class ScheduleClientView:
         elif action == 'stop':
             error = schedule_client.stop_system_process()
         elif action == 'log':
-            page: str = request.query_params.get('page', '1')
+            page: str = request.query_params.get('page', '0')
             size: str = request.query_params.get('size', '1024')
             if page.isdigit() and size.isdigit():
-                text = schedule_client.read_system_process_log(int(page), int(size) * 1024)
-                return HttpResponse(text, content_type='text/plain; charset=utf-8')
-            return Response(f'invalid page({page}) or size({size})', status=status.HTTP_400_BAD_REQUEST)
+                paged_log = schedule_client.read_system_process_log(int(size) * 1024)
+                return render(request, 'log_view.html', {
+                    'paged_log': paged_log,
+                    'logs': paged_log.read_page(int(page)).split('\n'),
+                })
+            return Response({'error': f'invalid page({page}) or size({size})'}, status=status.HTTP_400_BAD_REQUEST)
         elif action == 'restart':
             error = schedule_client.restart_system_process()
         else:
-            return Response('invalid action: %s' % action, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'invalid action: %s, only support start/stop/restart/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
         if error:
             return Response(error, status=status.HTTP_400_BAD_REQUEST)
         process = getattr(schedule_client.current_process(), 'pid', None)
         return Response({"msg": f"操作({action})成功", "process": process})
+
+    @staticmethod
+    @api_view(['GET'])
+    def schedule_thread_action(request: Request, action: str):
+        if action == 'start':
+            error = schedule_client.start_schedule_thread()
+        elif action == 'stop':
+            error = schedule_client.stop_schedule_thread()
+        elif action == 'log':
+            page: str = request.query_params.get('page', '0')
+            page_size: str = request.query_params.get('page_size', '1')
+            if page.isdigit() and page_size.isdigit():
+                paged_log = schedule_client.read_schedule_thread_log(int(page_size) * 1024)
+                return render(request, 'log_view.html', {
+                    'paged_log': paged_log,
+                    'logs': paged_log.read_page(int(page)).split('\n'),
+                })
+            return Response({'error': f'invalid page({page}) or page_size({page_size})'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+        thread = getattr(schedule_client.current_schedule_thread(), 'ident', None)
+        return Response({"msg": f"操作({action})成功", "process": thread})
 
 
 class TaskListView(UserListAPIView):

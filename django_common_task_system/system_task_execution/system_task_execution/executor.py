@@ -1,4 +1,3 @@
-import os
 import traceback
 import socket
 import logging
@@ -10,7 +9,7 @@ from datetime import datetime
 
 
 IP = socket.gethostbyname(socket.gethostname())
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('client')
 ScheduleLog = get_schedule_log_model()
 
 
@@ -164,15 +163,14 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
 
 
 def start_client(queue: Queue):
-    logger.info('system executor start')
-    for k, v in os.environ.items():
-        logger.info('Env: %s -> %s' % (k, v))
+    logger.info('system schedule execution process started')
     load_executors()
     while True:
         schedule = queue.get()
-        logger.info('get system schedule: %s', schedule)
         try:
-            executor = Executor(Schedule(schedule))
+            schedule = Schedule(schedule)
+            logger.info('get schedule: %s', schedule)
+            executor = Executor(schedule)
             executor.start()
         except Exception as e:
             logger.exception(e)

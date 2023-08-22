@@ -87,10 +87,10 @@ WSGI_APPLICATION = 'test_task_system.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'common_task_system_test',
+        'NAME': 'common_task_system_v2',
         'USER': 'root',
-        'PASSWORD': 'Cone3.1415926',
-        'HOST': '42.192.130.234',
+        'PASSWORD': '3.1415926',
+        'HOST': '127.0.0.1',
         'PORT': 3306,
         'OPTIONS': {'charset': 'utf8mb4'},
     }
