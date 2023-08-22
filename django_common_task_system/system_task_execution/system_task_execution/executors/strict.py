@@ -13,7 +13,7 @@ import requests
 import os
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('client')
 Schedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
