@@ -81,6 +81,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'test_task_system.wsgi.application'
 
 
+
 # Database
 # https://docs.djangoproject.com/en/4.1/ref/settings/#databases
 
