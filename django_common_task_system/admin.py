@@ -203,7 +203,8 @@ class ScheduleAdmin(BaseAdmin):
         return '-'
     schedule_sub_type.short_description = '详细'
 
-    def get_available_queues(self, obj):
+    @staticmethod
+    def get_available_queues(obj):
         return builtins.schedule_queues.values()
 
     def put(self, obj):
@@ -408,14 +409,14 @@ class TaskClientAdmin(admin.ModelAdmin):
     admin_subscription_url.short_description = '订阅地址'
 
     def stop_client(self, obj):
-        url = reverse('task-client-stop', args=(obj.pk,))
+        url = reverse('client-action', args=('stop',)) + '?client_id=%s' % obj.pk
         return format_html(
             '<a href="%s" target="_blank">停止</a>' % url
         )
     stop_client.short_description = '停止运行'
 
     def show_log(self, obj):
-        url = reverse('task-client-log', args=(obj.pk,))
+        url = reverse('client-action', args=('log',)) + '?client_id=%s' % obj.pk
         return format_html(
             '<a href="%s" target="_blank">查看日志</a>' % url
         )
@@ -607,9 +608,7 @@ class RetryScheduleAdmin(ExceptionScheduleAdmin):
 class OverviewAdmin(admin.ModelAdmin):
     actions = None
     list_display = ('name', 'state', 'admin_action')
-
-    def get_list_display_links(self, request, list_display):
-        return []
+    list_display_links = None
 
     def has_change_permission(self, request, obj=None):
         return False
@@ -623,22 +622,16 @@ class OverviewAdmin(admin.ModelAdmin):
 
     @staticmethod
     def action_client(obj: models.Overview):
-        log_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">查看日志</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        stop_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">停止</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        start_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">开启</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
-        restart_action = '<a href="/admin/django_common_task_system/%s/%s/change/" target="_blank">重启</a>' % (
-            Schedule._meta.model_name,
-            obj.state
-        )
+        return '<a href="/admin/django_common_task_system/%s/" target="_blank">管理</a>' % \
+               models.TaskClient._meta.model_name
+
+    @staticmethod
+    def action_process(obj: models.Overview):
+        action_url_name = 'system-process-action'
+        log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log', ))
+        stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop', ))
+        start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start', ))
+        restart_action = '<a href="%s" target="_blank">重启</a>' % reverse(action_url_name, args=('restart', ))
         if obj.state:
             return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action, restart_action])
         else:
@@ -658,9 +651,20 @@ class OverviewAdmin(admin.ModelAdmin):
             ExecuteStatus.FAILED
         )
 
+    @staticmethod
+    def action_schedule_thread(obj: models.Overview):
+        action_url_name = 'schedule-thread-action'
+        log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log',))
+        stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop',))
+        start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start',))
+        if obj.state:
+            return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action])
+        else:
+            return start_action
+
     def get_queryset(self, request):
         model = models.Overview
-        model.objects['client'] = model(
+        model.objects['process'] = model(
             name="系统计划处理进程ID",
             state=getattr(schedule_client.current_process(), 'pid', None)
         )
@@ -673,6 +677,14 @@ class OverviewAdmin(admin.ModelAdmin):
         model.objects['failed_schedule'] = model(
             name="失败计划数量",
             state=failed_count,
+        )
+        model.objects['client'] = model(
+            name="客户端数量",
+            state=models.TaskClient.objects.count(),
+        )
+        model.objects['schedule_thread'] = model(
+            name="计划调度线程",
+            state=getattr(schedule_client.current_schedule_thread(), 'ident', None),
         )
         for k, v in model.objects.items():
             v.action = k

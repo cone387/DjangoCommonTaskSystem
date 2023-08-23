@@ -20,15 +20,9 @@ urlpatterns = [
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
 
-    path('client/system/<slut:action>/', views.ScheduleClientView.system_action, name='schedule-client-action'),
-    path('client/<slut:action>/', views.ScheduleClientView.action, name='schedule-client-action'),
+    path('client/system/<slug:action>/', views.ScheduleClientView.system_process_action, name='system-process-action'),
+    path('client/schedule/<slug:action>/', views.ScheduleClientView.schedule_thread_action,
+         name='schedule-thread-action'),
+    path('client/<slug:action>/', views.ScheduleClientView.action, name='client-action'),
 
-
-    path('client/log/<int:client_id>/', views.ScheduleClientView.show_logs, name='schedule-client-log'),
-    path('client/start/', views.ScheduleClientView.start_client, name='schedule-client-start'),
-    path('client/stop/<int:client_id>/', views.ScheduleClientView.stop_client, name='schedule-client-stop'),
-
-    path('client/system/log/', views.ScheduleClientView.show_system_process_logs, name='system-system-log'),
-    path('client/system/start/', views.ScheduleClientView.start_system_process, name='system_process-start'),
-    path('client/system/stop/', views.ScheduleClientView.stop_system_process, name='system-process-stop'),
 ] + router.urls

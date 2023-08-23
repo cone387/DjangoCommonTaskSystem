@@ -9,6 +9,7 @@ class TaskStatus(TextChoices):
 
 class ScheduleStatus(TextChoices):
     OPENING = 'O', '开启'
+    AUTO = 'A', '自动'
     CLOSED = 'C', '关闭'
     DONE = 'D', '已完成'
     TEST = 'T', '测试'
@@ -78,8 +79,8 @@ class ExecuteStatus(TextChoices):
     INIT = 'I', '初始化'
     RUNNING = 'R', '运行中'
     SUCCEED = 'S', '运行成功'
-    EMPTY = 'E', '执行成功了，但是没有日志'
-    NO_RETRY = 'N', '无重试的异常'
+    EMPTY = 'E', '执行成功了，结果为空'
+    NO_RETRY = 'N', '无需重试的异常'
     EXCEPTION = 'X', '运行异常'
     PARTIAL_FAILED = 'P', '部分失败'
     FAILED = 'F', '任务失败, 无需重试'
