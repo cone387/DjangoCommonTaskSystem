@@ -337,6 +337,9 @@ class CustomManager(models.Manager, dict):
     def none(self):
         return QuerySet([], self.model)
 
+    def count(self):
+        return len(self)
+
     def __get__(self, instance, owner):
         return self._meta.managers_map[self.manager.name]
 
@@ -543,38 +546,6 @@ class RetrySchedule(ExceptionSchedule):
         managed = False
         verbose_name = verbose_name_plural = '待重试计划'
         ordering = ('id', '-schedule_time',)
-
-
-class OverviewManager(CustomManager):
-
-    def statistics(self):
-        self['client'] = Overview(
-            name="系统计划处理进程ID",
-            state=schedule_client.current_process().pid,
-            action="""
-                
-            """
-        )
-        self['schedule'] = Overview(
-            name="已启用计划数量",
-            state=Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
-            action="""
-                <a href="/admin/schedule/schedule/?status=opening">查看详情</a>
-            """
-        )
-        failed_count = schedule_util.get_failed_directly_records('opening').count() + \
-                       schedule_util.get_maximum_retries_exceeded_records('opening').count()
-        self['failed-schedule'] = Overview(
-            name="失败计划数量",
-            state=failed_count,
-            action="""
-                <a href="/admin/schedule/exceptionschedule/?reason=failed_directly">查看详情</a>
-            """
-        )
-
-    def all(self):
-        self.statistics()
-        return QuerySet(dict.values(self), self.model)
 
 
 class Overview(models.Model):

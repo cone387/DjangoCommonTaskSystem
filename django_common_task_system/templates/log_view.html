@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>日志查看</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .log-container {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin-bottom: 50px; /* Add margin to make space for pagination */
+        }
+        .pagination-container {
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+            background-color: #f9f9f9;
+            border-top: 1px solid #ccc;
+            padding: 10px;
+            display: flex;
+            justify-content: center;
+        }
+        .pagination {
+            display: inline-block;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+        .page-number {
+            display: inline-block;
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            margin: 0 5px;
+            cursor: pointer;
+        }
+        .log-entry {
+            margin-bottom: 1px;
+        }
+        .current-page {
+            background-color: #007bff; /* 设置当前页码的背景颜色 */
+            color: white; /* 设置当前页码的文本颜色 */
+        }
+    </style>
+    <script>
+        function goToPage(pageNumber, pageSize) {
+            window.location.href = '?page=' + pageNumber + '&page_size=' + pageSize;
+        }
+    </script>
+</head>
+<body>
+    <div class="log-container">
+        <!-- Replace this section with your original log content -->
+        {% for log in logs %}
+            <div class="log-entry">{{ log }}</div>
+        {% endfor %}
+        <!-- End of log content -->
+    </div>
+    <div class="pagination-container">
+        <ul class="pagination">
+            {% if paged_log.current > paged_log.max_display_page %}
+                <li class="page-number" onclick="goToPage(1, {{ paged_log.real_page_size }})">1</li>
+                <li class="page-number" >···</li>
+            {% endif %}
+            {% for num in paged_log.page_range %}
+                {% if num == paged_log.current %}
+                    <li class="page-number current-page" onclick="goToPage({{ num }}, {{ paged_log.real_page_size }})">
+                        {{ num }}
+                    </li>
+                {% elif num >= paged_log.left_offset and num <= paged_log.right_offset %}
+                    <li class="page-number" onclick="goToPage({{ num }}, {{ paged_log.real_page_size }})">
+                        {{ num }}
+                    </li>
+                {% endif %}
+            {% endfor %}
+            {% if paged_log.page_num > paged_log.max_display_page and paged_log.current < paged_log.max_offset %}
+                <li class="page-number" >···</li>
+                <li class="page-number" onclick="goToPage({{ paged_log.page_num }}, {{ paged_log.real_page_size }})">
+                    {{ paged_log.page_num }}
+                </li>
+            {% endif %}
+        </ul>
+    </div>
+</body>
+</html>
