@@ -55,12 +55,19 @@ class PermissionType(TextChoices):
     IP_WHITE_LIST = 'I', 'IP白名单'
 
 
+class ClientEngine(TextChoices):
+    DOCKER = 'Docker'
+    PROCESS = 'Process'
+
+
 class TaskClientStatus(TextChoices):
     # start status
     INIT = 'Init', '初始化'
     PULLING = 'Pulling', '拉取镜像中'
     BUILDING = 'Building', '构建中'
-    SUCCEED = 'Running', '启动成功'
+    STOPPING = 'Stopping', '停止中'
+    STOPPED = 'Stopped', '已停止'
+    RUNNING = 'Running', '启动成功'
     FAILED = 'Failed', '启动失败'
 
 

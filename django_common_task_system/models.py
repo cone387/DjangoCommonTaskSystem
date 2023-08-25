@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus,
+    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ClientEngine,
     PermissionType, ExecuteStatus, ScheduleExceptionReason
 )
 from django_common_objects.models import CommonTag, CommonCategory
@@ -13,12 +13,11 @@ from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.schedule import util as schedule_util
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
-from docker.models.containers import Container
 import os
 import re
 
@@ -344,27 +343,37 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
+class DockerEngine:
+
+    def __init__(self):
+        self.container_id = None
+        self.container_name = None
+        self.image_name = None
+        self.container_ip = None
+        self.container_port = None
+        self.container_status = None
+        self.container_create_time = None
+
+
 class TaskClient(models.Model):
-    container: Container = None
-    group = models.CharField(max_length=100, verbose_name='分组')
+    # 两种运行模式: 容器模式，进程模式
+    runner = None
+
+    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    machine_name = models.CharField(max_length=100, verbose_name='机器名', default='default')
+    machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP')
+    group = models.CharField(max_length=100, verbose_name='分组', default='default')
     subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
     subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
-    process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
-    container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
-    container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
-    container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
-    container_status = models.CharField(choices=ContainerStatus.choices, default=ContainerStatus.NONE,
-                                        max_length=20, verbose_name='容器状态')
-    run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
+    engine = models.CharField(max_length=100, verbose_name='引擎', choices=ClientEngine.choices,
+                              default=ClientEngine.DOCKER)
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
-                                      verbose_name='启动结果', default=TaskClientStatus.SUCCEED)
-    settings = models.TextField(verbose_name='配置', blank=True, null=True)
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+                                      verbose_name='启动结果', default=TaskClientStatus.RUNNING)
     startup_log = models.CharField(max_length=2000, null=True, blank=True)
-
-    settings_module = {}
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
+    settings = {}
 
     objects = CustomManager()
 
@@ -377,7 +386,7 @@ class TaskClient(models.Model):
 
     @cached_property
     def fp(self):
-        return get_md5("%s-%s" % (self.container_id, self.process_id))
+        return get_md5("%s" % self.runner.id if self.runner else self.client_id)
 
     @cached_property
     def settings_file(self):
@@ -398,10 +407,8 @@ class TaskClient(models.Model):
     ):
         if not self.client_id:
             self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
-        if self.group is None:
-            self.group = self.__class__.__name__
         TaskClient.objects[self.client_id] = self
-        if self.container is None:
+        if self.runner is None:
             self.create_time = timezone.now()
             post_save.send(
                 sender=TaskClient,
@@ -411,14 +418,11 @@ class TaskClient(models.Model):
                 raw=False,
                 using=using,
             )
-        else:
-            self.create_time = datetime.strptime(self.container.attrs['Created'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
 
     def delete(self, using=None, keep_parents=False):
-        if self.container is not None:
-            self.container.stop()
-            self.container.remove()
-        TaskClient.objects.pop(self.client_id)
+        if self.runner is not None:
+            self.runner.stop()
+        TaskClient.objects.pop(self.client_id, None)
 
 
 class ExceptionScheduleManager(CustomManager):

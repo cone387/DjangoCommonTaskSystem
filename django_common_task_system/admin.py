@@ -376,9 +376,9 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 class TaskClientAdmin(admin.ModelAdmin):
-    list_display = ('client_id', 'container_id', 'container_name',
+    list_display = ('client_id', 'runner_id', 'runner_attr',
                     'admin_subscription_url',
-                    'startup_status', 'container_status',
+                    'startup_status',
                     'stop_client', 'show_log', 'create_time')
     form = forms.TaskClientForm
     fields = (
@@ -396,8 +396,25 @@ class TaskClientAdmin(admin.ModelAdmin):
         'create_time',
     )
 
-    list_filter = ('container_status',)
+    # list_filter = ('runner_status',)
     readonly_fields = ('create_time', )
+
+    def runner_id(self, obj):
+        return obj.runner.id
+    runner_id.short_description = 'RunnerID'
+
+    def runner_attr(self, obj):
+        # 分行展示
+        attrs = []
+        for k, v in obj.runner.attrs.items():
+            # k粗体 加大行间距
+            attrs.append('<b>%s</b>: %s' % (k, v))
+        return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
+    runner_attr.short_description = '属性'
+
+    def runner_status(self, obj):
+        return obj.runner.status
+    runner_status.short_description = '状态'
 
     def admin_subscription_url(self, obj):
         url = urlparse(obj.subscription_url)
@@ -437,24 +454,15 @@ class TaskClientAdmin(admin.ModelAdmin):
                 self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
             else:
                 for container in containers:
-                    kwargs = {x.split('=')[0].strip('-'): x.split('=')[1] for x in container.attrs['Args']}
+                    kwargs = {x.split('=')[0].strip('-'): x.split('=')[1] for x in container.attrs['Args'] if '=' in x}
                     subscription_url = kwargs.pop('subscription-url', None)
-                    try:
-                        match = resolve(urlparse(subscription_url).path)
-                    except Resolver404:
-                        group = 'remote'
-                    else:
-                        group = match.kwargs.get('code', 'remote')
-                    client = self.model(
-                        group=group,
-                        container_id=container.short_id,
-                        container_name=container.name,
-                        container_image=';'.join(container.image.tags[:1]),
-                        container_status=container.status.capitalize(),
+                    client = models.TaskClient(
                         subscription_url=subscription_url,
                         subscription_kwargs=kwargs,
                     )
-                    client.container = container
+                    client.runner = schedule_client.ClientRunner(container)
+                    client.create_time = datetime.strptime(container.attrs['Created'].split('.')[0],
+                                                           "%Y-%m-%dT%H:%M:%S")
                     client.save()
 
     def get_queryset(self, request):

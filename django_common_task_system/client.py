@@ -1,11 +1,13 @@
 from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
-from django_common_task_system.choices import TaskClientStatus
+from django_common_task_system.choices import TaskClientStatus, ClientEngine
 from django_common_task_system.schedule.backend import ScheduleThread
+from django_common_task_system.models import TaskClient
 from docker.errors import APIError
 from django.conf import settings
 from typing import Union
 from threading import Lock, Timer
+from docker.models.containers import Container
 import os
 import subprocess
 import logging
@@ -38,25 +40,11 @@ def run_in_subprocess(cmd):
     return not err, logs
 
 
-class SimpleTaskClient:
-
-    def __init__(self, client_id: int, container_image: str, container_name: str, settings_module: dict,
-                 run_in_container: bool = True, env=None, container_status=TaskClientStatus.SUCCEED):
-        self.client_id = client_id
-        self.container_image = container_image
-        self.container_name = container_name
-        self.settings_module = settings_module
-        self.run_in_container = run_in_container
-        self.env = env
-        self.container = None
-        self.container_status = container_status
-
-
 def start_in_container(client):
     # pull image
     docker_client = docker.from_env()
     client.startup_status = TaskClientStatus.PULLING
-    command = "common-task-system-client --subscription-url=%s" % client.subscription_url
+    command = 'common-task-system-client --subscription-url="%s"' % client.subscription_url
     try:
         container = docker_client.containers.create(
             client.container_image, command=command,
@@ -106,20 +94,60 @@ def start_in_process(client):
     p = Process(target=start_task_system, daemon=True)
     p.start()
     client.client_id = p.pid
-    client.startup_status = TaskClientStatus.SUCCEED
+    client.startup_status = TaskClientStatus.RUNNING
     if not p.is_alive():
         raise RuntimeError('client process start failed, process is not alive')
 
 
-def start_client(client):
+class ClientRunner:
+    def __init__(self, runner, remote=False):
+        self.attrs = {}
+        self.runner = None
+        self.remote = remote
+        if isinstance(self.runner, Container):
+            self.id = runner.short_id
+            self.attrs = {
+                'image': runner.image.tags[0],
+                'name': runner.name,
+            }
+            self.status = runner.status
+        elif isinstance(runner, Process):
+            self.id = runner.pid
+            self.status = TaskClientStatus.RUNNING
 
+    def stop(self):
+        if not self.remote:
+            if isinstance(self.runner, Container):
+                self.runner.stop()
+                self.runner.remove()
+            elif isinstance(self.runner, Process):
+                self.runner.kill()
+
+    def read_log(self, page=1, page_size=10):
+        if not self.remote:
+            if isinstance(self.runner, Container):
+                return self.runner.logs(tail=1000)
+            elif isinstance(self.runner, Process):
+                return ''
+        else:
+            return ''
+
+    def start(self):
+        if not self.remote:
+            if isinstance(self.runner, Container):
+                self.runner.start()
+            elif isinstance(self.runner, Process):
+                self.runner.start()
+
+
+def start_client(client: TaskClient):
     client.startup_status = TaskClientStatus.INIT
     try:
-        if client.run_in_container:
+        if client.engine == ClientEngine.DOCKER:
             start_in_container(client)
         else:
             start_in_process(client)
-        client.startup_status = TaskClientStatus.SUCCEED
+        client.startup_status = TaskClientStatus.RUNNING
     except Exception as e:
         client.startup_status = TaskClientStatus.FAILED
         client.startup_log = str(e)
