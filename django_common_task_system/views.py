@@ -93,9 +93,9 @@ def delete_task(sender, instance: Task, **kwargs):
 
 @receiver(post_save, sender=models.TaskClient)
 def add_client(sender, instance: models.TaskClient, created, **kwargs):
-    thread = Thread(target=schedule_client.start_client, args=(instance,))
-    thread.start()
-
+    # thread = Thread(target=schedule_client.start_client, args=(instance,))
+    # thread.start()
+    schedule_client.start_client(instance)
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
@@ -331,7 +331,11 @@ class ScheduleClientView:
             client.delete()
             return Response({'message': 'stop client(%s) success' % client_id})
         elif action == 'log':
-            return HttpResponse(client.runner.read_log(), content_type='text/plain; charset=utf-8')
+            if client.startup_status == TaskClientStatus.RUNNING.value:
+                log = client.runner.read_log()
+            else:
+                log = client.startup_log
+            return HttpResponse(log, content_type='text/plain; charset=utf-8')
         else:
             return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
                             status=status.HTTP_400_BAD_REQUEST)

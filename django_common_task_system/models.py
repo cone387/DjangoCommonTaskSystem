@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ClientEngine,
+    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ClientEngineType,
     PermissionType, ExecuteStatus, ScheduleExceptionReason
 )
 from django_common_objects.models import CommonTag, CommonCategory
@@ -343,16 +343,35 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
-class DockerEngine:
+class ClientEngine:
+    def __init__(self, engine_settings: dict):
+        self.engine_settings = engine_settings
 
-    def __init__(self):
-        self.container_id = None
-        self.container_name = None
-        self.image_name = None
-        self.container_ip = None
-        self.container_port = None
-        self.container_status = None
-        self.container_create_time = None
+    def __setattr__(self, key, value):
+        if key == 'engine_settings':
+            super().__setattr__(key, value)
+            return
+        o = self.engine_settings.get(key)
+        if o is not None and o != value:
+            self.engine_settings[key] = value
+        super().__setattr__(key, value)
+
+
+class DockerEngine(ClientEngine):
+    def __init__(self, engine_settings: dict):
+        super().__init__(engine_settings)
+        self.container_id = engine_settings.get('container_id')
+        self.container_name = engine_settings.get(
+            'container_name') or 'common-task-system-client-%s' % datetime.now().strftime("%Y%m%d%H%M%S")
+        self.image = engine_settings.get('image') or 'cone387/common-task-system-client:latest'
+        self.container_ip = engine_settings.get('container_ip')
+        self.container_port = engine_settings.get('container_port')
+        self.container_status = engine_settings.get('container_status')
+        self.container_create_time = engine_settings.get('container_create_time')
+
+
+class ProcessEngine(ClientEngine):
+    pass
 
 
 class TaskClient(models.Model):
@@ -360,22 +379,31 @@ class TaskClient(models.Model):
     runner = None
 
     client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
-    machine_name = models.CharField(max_length=100, verbose_name='机器名', default='default')
-    machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP')
-    group = models.CharField(max_length=100, verbose_name='分组', default='default')
+    machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
+    machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+    group = models.CharField(max_length=100, verbose_name='分组', default='默认')
     subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
     subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-    engine = models.CharField(max_length=100, verbose_name='引擎', choices=ClientEngine.choices,
-                              default=ClientEngine.DOCKER)
+    engine_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ClientEngineType.choices,
+                                   default=ClientEngineType.DOCKER)
+    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
                                       verbose_name='启动结果', default=TaskClientStatus.RUNNING)
     startup_log = models.CharField(max_length=2000, null=True, blank=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
-    settings = {}
+    settings = models.JSONField(verbose_name='客户端设置', default=dict)
 
     objects = CustomManager()
+
+    @property
+    def engine(self):
+        if self.engine_type == ClientEngineType.DOCKER:
+            return DockerEngine(self.engine_settings)
+        elif self.engine_type == ClientEngineType.PROCESS:
+            return ProcessEngine(self.engine_settings)
+        else:
+            raise ValueError("Invalid engine_type: %s" % self.engine_type)
 
     class Meta:
         managed = False

@@ -1,12 +1,11 @@
 from .builtins import builtins
 from django.contrib import admin, messages
-from django.urls import reverse, Resolver404
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.db.models import Count
 from datetime import datetime
 from docker.errors import APIError
-from django.urls import resolve
 import docker
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
@@ -376,34 +375,71 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 class TaskClientAdmin(admin.ModelAdmin):
-    list_display = ('client_id', 'runner_id', 'runner_attr',
+    list_display = ('client_id', 'group', 'machine', 'runner_id', 'runner_attr',
                     'admin_subscription_url',
                     'startup_status',
-                    'stop_client', 'show_log', 'create_time')
+                    'runner_status',
+                    'action', 'create_time')
     form = forms.TaskClientForm
-    fields = (
-        'run_in_container',
-        'container_image',
-        'container_name',
-        'system_subscription_url',
-        ('system_subscription_scheme', 'system_subscription_host', 'system_subscription_port'),
-        'custom_subscription_url',
-        'subscription_kwargs',
-        'settings',
-        'env',
-        'process_id',
-        'container_id',
-        'create_time',
+    fieldsets = (
+        (None, {
+            'fields': (
+                ('machine', 'engine_type')
+            ),
+        }),
+        ("容器配置", {
+                'fields': (
+                    'container_image',
+                    'container_name',
+                    'container_id'
+                ),
+                "classes": ("docker-config", )
+            },),
+        ("进程配置", {
+            'fields': (
+                'process_id',
+            ),
+            "classes": ("process-config",)
+        },),
+        ("订阅配置", {
+            'fields': (
+                'subscription_url',
+                ('subscription_scheme', 'subscription_host', 'subscription_port'),
+                'custom_subscription_url',
+                'subscription_kwargs',
+            )},),
+        ("高级配置", {
+            'fields': (
+                'settings',
+                'env',
+            ),
+            "classes": ("collapse", )
+        }),
+        (None, {
+            'fields': (
+                'create_time',
+            ),
+        }),
     )
 
     # list_filter = ('runner_status',)
     readonly_fields = ('create_time', )
 
+    def machine(self, obj: models.TaskClient):
+        attrs = [
+            '<b>IP</b>: %s' % obj.machine_ip,
+            '<b>主机名</b>: %s' % obj.machine_name,
+        ]
+        return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
+    machine.short_description = '机器'
+
     def runner_id(self, obj):
-        return obj.runner.id
+        return getattr(obj.runner, 'id', None)
     runner_id.short_description = 'RunnerID'
 
     def runner_attr(self, obj):
+        if obj.runner is None:
+            return '-'
         # 分行展示
         attrs = []
         for k, v in obj.runner.attrs.items():
@@ -413,8 +449,8 @@ class TaskClientAdmin(admin.ModelAdmin):
     runner_attr.short_description = '属性'
 
     def runner_status(self, obj):
-        return obj.runner.status
-    runner_status.short_description = '状态'
+        return getattr(obj.runner, 'status', None)
+    runner_status.short_description = 'Runner状态'
 
     def admin_subscription_url(self, obj):
         url = urlparse(obj.subscription_url)
@@ -425,19 +461,17 @@ class TaskClientAdmin(admin.ModelAdmin):
         )
     admin_subscription_url.short_description = '订阅地址'
 
-    def stop_client(self, obj):
-        url = reverse('client-action', args=('stop',)) + '?client_id=%s' % obj.pk
+    def action(self, obj):
+        if obj.runner is None:
+            return '-'
+        stop_url = reverse('client-action', args=('stop',)) + '?client_id=%s' % obj.pk
+        log_url = reverse('client-action', args=('log',)) + '?client_id=%s' % obj.pk
+        stop_action = '<a href="%s" target="_blank">停止</a>' % stop_url
+        log_action = '<a href="%s" target="_blank">日志</a>' % log_url
         return format_html(
-            '<a href="%s" target="_blank">停止</a>' % url
+            '<span style="line-height: 2">%s<br>%s</span>' % (stop_action, log_action)
         )
-    stop_client.short_description = '停止运行'
-
-    def show_log(self, obj):
-        url = reverse('client-action', args=('log',)) + '?client_id=%s' % obj.pk
-        return format_html(
-            '<a href="%s" target="_blank">查看日志</a>' % url
-        )
-    show_log.short_description = '日志'
+    action.short_description = '操作'
 
     containers_loaded = False
 
@@ -460,7 +494,8 @@ class TaskClientAdmin(admin.ModelAdmin):
                         subscription_url=subscription_url,
                         subscription_kwargs=kwargs,
                     )
-                    client.runner = schedule_client.ClientRunner(container)
+                    runner = schedule_client.ClientRunner(client)
+                    runner.runner = container
                     client.create_time = datetime.strptime(container.attrs['Created'].split('.')[0],
                                                            "%Y-%m-%dT%H:%M:%S")
                     client.save()
@@ -471,6 +506,15 @@ class TaskClientAdmin(admin.ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return False
+
+    class Media:
+        js = (
+            'https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js',
+            # 'https://cdn.bootcss.com/popper.js/1.14.3/umd/popper.min.js',
+            # 'https://cdn.bootcss.com/bootstrap/4.1.3/js/bootstrap.min.js',
+            # # reverse('admin:jsi18n'),
+            'common_task_system/js/task_client_admin.js',
+        )
 
 
 class ScheduleFilter(admin.SimpleListFilter):
@@ -615,11 +659,22 @@ class RetryScheduleAdmin(ExceptionScheduleAdmin):
 
 class OverviewAdmin(admin.ModelAdmin):
     actions = None
-    list_display = ('name', 'state', 'admin_action')
+    list_display = ('name', 'admin_state', 'admin_action')
     list_display_links = None
 
     def has_change_permission(self, request, obj=None):
         return False
+
+    def admin_state(self, obj):
+        if isinstance(obj.state, dict):
+            states = []
+            for k, v in obj.state.items():
+                # k粗体 加大行间距
+                states.append('<b>%s</b>: %s' % (k, v))
+            return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(states))
+        else:
+            return obj.state
+    admin_state.short_description = '状态'
 
     def admin_action(self, obj: models.Overview):
         action = getattr(self, 'action_%s' % obj.action, None)
@@ -640,7 +695,7 @@ class OverviewAdmin(admin.ModelAdmin):
         stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop', ))
         start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start', ))
         restart_action = '<a href="%s" target="_blank">重启</a>' % reverse(action_url_name, args=('restart', ))
-        if obj.state:
+        if isinstance(obj.state, dict):
             return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action, restart_action])
         else:
             return start_action
@@ -665,34 +720,78 @@ class OverviewAdmin(admin.ModelAdmin):
         log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log',))
         stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop',))
         start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start',))
-        if obj.state:
+        if isinstance(obj.state, dict):
             return '&nbsp;&nbsp;|&nbsp;&nbsp;'.join([log_action, stop_action])
         else:
             return start_action
 
     def get_queryset(self, request):
         model = models.Overview
+        system_schedule_process = schedule_client.current_process()
+        if system_schedule_process is None:
+            state = "未启动"
+        else:
+            state = {
+                '进程ID': system_schedule_process.pid,
+                '进程状态': '运行中' if system_schedule_process.is_alive() else '已停止',
+                '已处理计划数量': (system_schedule_process.success_count.value + system_schedule_process.failed_count.value),
+                '成功计划数量': system_schedule_process.success_count.value,
+                '失败计划数量': system_schedule_process.failed_count.value,
+                '最近处理时间': datetime.fromtimestamp(
+                    system_schedule_process.last_process_time.value).strftime('%Y-%m-%d %H:%M:%S'),
+            }
         model.objects['process'] = model(
-            name="系统计划处理进程ID",
-            state=getattr(schedule_client.current_process(), 'pid', None)
+            name="系统计划处理进程",
+            state=state
         )
+
         model.objects['enabled_schedule'] = model(
-            name="已启用计划数量",
-            state=Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
+            name="计划概览",
+            state={
+                "已启用计划数量": Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
+                "系统计划数量": Schedule.objects.filter(
+                    task__category=builtins.categories.system_task).count()
+            },
         )
         failed_count = schedule_util.get_failed_directly_records('opening').count() + schedule_util.\
             get_maximum_retries_exceeded_records('opening').count()
         model.objects['failed_schedule'] = model(
-            name="失败计划数量",
-            state=failed_count,
+            name="计划运行日志",
+            state={
+                "异常次数": failed_count,
+                "日志数量": ScheduleLog.objects.count(),
+            },
         )
+        groups = set()
+        machines = set()
+        for client in models.TaskClient.objects.all():
+            client: models.TaskClient
+            machines.add(client.machine_ip)
+            groups.add(client.group)
+
         model.objects['client'] = model(
             name="客户端数量",
-            state=models.TaskClient.objects.count(),
+            state={
+                "机器数量": len(machines),
+                "分组数量": len(groups),
+                "客户端数量": models.TaskClient.objects.count()
+            },
         )
+        schedule_thread = schedule_client.current_schedule_thread()
+        if schedule_thread is None:
+            state = "未启动"
+        else:
+            state = {
+                "运行ID": schedule_thread.ident,
+                "线程名称": schedule_thread.name,
+                "线程状态": "运行中" if schedule_thread.is_alive() else "已停止",
+                "已调度计划数量": schedule_thread.scheduled_count,
+                "最近调度时间": schedule_thread.last_schedule_time.strftime('%Y-%m-%d %H:%M:%S')
+                if schedule_thread.last_schedule_time else None,
+            }
         model.objects['schedule_thread'] = model(
             name="计划调度线程",
-            state=getattr(schedule_client.current_schedule_thread(), 'ident', None),
+            state=state,
         )
         for k, v in model.objects.items():
             v.action = k

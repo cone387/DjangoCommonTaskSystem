@@ -55,7 +55,7 @@ class PermissionType(TextChoices):
     IP_WHITE_LIST = 'I', 'IP白名单'
 
 
-class ClientEngine(TextChoices):
+class ClientEngineType(TextChoices):
     DOCKER = 'Docker'
     PROCESS = 'Process'
 

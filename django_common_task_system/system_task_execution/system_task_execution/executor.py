@@ -6,6 +6,7 @@ from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
 from datetime import datetime
+from multiprocessing import Value
 
 
 IP = socket.gethostbyname(socket.gethostname())
@@ -162,7 +163,7 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     module.__loaded__ = True
 
 
-def start_client(queue: Queue):
+def start_client(queue: Queue, success_count: Value, failed_count: Value, last_process_time: Value):
     logger.info('system schedule execution process started')
     load_executors()
     while True:
@@ -172,7 +173,9 @@ def start_client(queue: Queue):
             logger.info('get schedule: %s', schedule)
             executor = Executor(schedule)
             executor.start()
+            success_count.value += 1
         except Exception as e:
+            failed_count.value += 1
             logger.exception(e)
             try:
                 ExceptionReport.objects.create(
@@ -181,3 +184,5 @@ def start_client(queue: Queue):
                 )
             except Exception as e:
                 logger.exception(e)
+        finally:
+            last_process_time.value = datetime.now().timestamp()

@@ -22,6 +22,7 @@ ScheduleSerializer = get_schedule_serializer()
 class ScheduleThread(Thread):
     schedule_event = Event()
     last_schedule_time = None
+    scheduled_count = 0
     log_file = os.path.join(os.getcwd(), 'logs', 'schedule-thread.log')
 
     def __init__(self):
@@ -62,6 +63,7 @@ class ScheduleThread(Thread):
                     raise e
             put_size = queue.qsize() - before_size
             schedule_result[queue_instance.code] = put_size
+            cls.scheduled_count += put_size
         cls.last_schedule_time = now
         for queue_code, put_size in schedule_result.items():
             logger.info('schedule %s schedules to %s' % (put_size, queue_code))
@@ -79,5 +81,3 @@ class ScheduleThread(Thread):
             except Exception as e:
                 logger.exception(e)
             time.sleep(SCHEDULE_INTERVAL)
-
-

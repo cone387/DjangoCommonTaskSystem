@@ -1,14 +1,16 @@
 from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
-from django_common_task_system.choices import TaskClientStatus, ClientEngine
+from django_common_task_system.choices import TaskClientStatus, ClientEngineType
 from django_common_task_system.schedule.backend import ScheduleThread
-from django_common_task_system.models import TaskClient
+from django_common_task_system.models import TaskClient, DockerEngine
 from docker.errors import APIError
 from django.conf import settings
 from typing import Union
-from threading import Lock, Timer
+from threading import Lock, Timer, Thread
 from docker.models.containers import Container
+from django_common_task_system.system_task_execution.main import SystemScheduleProcess
 import os
+import traceback
 import subprocess
 import logging
 import locale
@@ -25,7 +27,7 @@ _schedule_thread: Union[ScheduleThread, None] = None
 _schedule_thread_lock = Lock()
 
 
-def current_process() -> Union[Process, None]:
+def current_process():
     return _current_process
 
 
@@ -40,18 +42,22 @@ def run_in_subprocess(cmd):
     return not err, logs
 
 
-def start_in_container(client):
+def run_in_container(client):
     # pull image
     docker_client = docker.from_env()
     client.startup_status = TaskClientStatus.PULLING
-    command = 'common-task-system-client --subscription-url="%s"' % client.subscription_url
+    engine: DockerEngine = client.engine
+    settings_file = '/mnt/task-system-client-settings.py'
+    command = f'common-task-system-client --subscription-url="{client.subscription_url}" --settings="{settings_file}"'
     try:
         container = docker_client.containers.create(
-            client.container_image, command=command,
-            name=client.container_name, detach=True)
+            engine.image, command=command, name=engine.container_name,
+            volumes=[f"{client.settings_file}:{settings_file}"],
+            detach=True
+        )
     except docker.errors.ImageNotFound:
-        image, tag = client.container_image.split(':') if ':' in client.container_image else (
-            client.container_image, None)
+        image, tag = engine.image.split(':') if ':' in engine.image else (
+            engine.image, None)
         for _ in range(3):
             try:
                 docker_client.images.pull(image, tag=tag)
@@ -59,18 +65,16 @@ def start_in_container(client):
             except APIError:
                 pass
         else:
-            raise RuntimeError('pull image failed: %s' % client.container_image)
-        container = docker_client.containers.create(client.container_image,
+            raise RuntimeError('pull image failed: %s' % engine.image)
+        container = docker_client.containers.create(engine.image,
                                                     command=command,
-                                                    name=client.container_name, detach=True)
-    client.container_id = container.short_id
-    client.container = container
+                                                    name=engine.container_name, detach=True)
     container.start()
     container = docker_client.containers.get(container.short_id)
-    client.container_status = container.status.capitalize()
+    return container
 
 
-def start_in_process(client):
+def run_in_process(client):
     set_start_method('spawn', True)
     os.environ['TASK_CLIENT_SETTINGS_MODULE'] = client.settings_file.replace(
         os.getcwd(), '').replace(os.sep, '.').strip('.py')
@@ -97,60 +101,84 @@ def start_in_process(client):
     client.startup_status = TaskClientStatus.RUNNING
     if not p.is_alive():
         raise RuntimeError('client process start failed, process is not alive')
+    return p
 
 
 class ClientRunner:
-    def __init__(self, runner, remote=False):
-        self.attrs = {}
-        self.runner = None
-        self.remote = remote
-        if isinstance(self.runner, Container):
-            self.id = runner.short_id
-            self.attrs = {
+    def __init__(self, client: TaskClient):
+        if client.runner is None:
+            client.runner = self
+            self.runner = None
+        else:
+            self.runner = client.runner.runner
+        self.client = client
+
+    @property
+    def attrs(self):
+        runner = self.runner
+        if isinstance(runner, Container):
+            return {
                 'image': runner.image.tags[0],
                 'name': runner.name,
             }
-            self.status = runner.status
         elif isinstance(runner, Process):
-            self.id = runner.pid
-            self.status = TaskClientStatus.RUNNING
+            return {
+                'process_id': runner.pid,
+            }
+        else:
+            return {}
+
+    @property
+    def status(self):
+        runner = self.runner
+        if isinstance(runner, Container):
+            return runner.status.capitalize()
+        elif isinstance(runner, Process):
+            return TaskClientStatus.RUNNING if runner.is_alive() else TaskClientStatus.FAILED
+        else:
+            return None
+
+    @property
+    def id(self):
+        runner = self.runner
+        if isinstance(runner, Container):
+            return runner.short_id
+        elif isinstance(runner, Process):
+            return runner.pid
+        else:
+            return None
 
     def stop(self):
-        if not self.remote:
-            if isinstance(self.runner, Container):
-                self.runner.stop()
-                self.runner.remove()
-            elif isinstance(self.runner, Process):
-                self.runner.kill()
+        if isinstance(self.runner, Container):
+            self.runner.stop()
+            self.runner.remove()
+        elif isinstance(self.runner, Process):
+            self.runner.kill()
 
     def read_log(self, page=1, page_size=10):
-        if not self.remote:
-            if isinstance(self.runner, Container):
-                return self.runner.logs(tail=1000)
-            elif isinstance(self.runner, Process):
-                return ''
-        else:
+        if isinstance(self.runner, Container):
+            return self.runner.logs(tail=1000)
+        elif isinstance(self.runner, Process):
             return ''
 
     def start(self):
-        if not self.remote:
-            if isinstance(self.runner, Container):
-                self.runner.start()
-            elif isinstance(self.runner, Process):
-                self.runner.start()
+        client = self.client
+        try:
+            if client.engine_type == ClientEngineType.DOCKER:
+                self.runner = run_in_container(client)
+            else:
+                self.runner = run_in_process(client)
+            client.startup_status = TaskClientStatus.RUNNING
+        except Exception:
+            client.startup_status = TaskClientStatus.FAILED
+            client.startup_log = traceback.format_exc()
 
 
 def start_client(client: TaskClient):
     client.startup_status = TaskClientStatus.INIT
-    try:
-        if client.engine == ClientEngine.DOCKER:
-            start_in_container(client)
-        else:
-            start_in_process(client)
-        client.startup_status = TaskClientStatus.RUNNING
-    except Exception as e:
-        client.startup_status = TaskClientStatus.FAILED
-        client.startup_log = str(e)
+    runner = ClientRunner(client)
+    thread = Thread(target=runner.start)
+    thread.start()
 
 
 def start_system_process() -> str:
@@ -163,13 +191,11 @@ def start_system_process() -> str:
             error = 'another process is starting'
         else:
             from django_common_task_system.builtins import builtins
-            from django_common_task_system.system_task_execution import main
             set_start_method('spawn', True)
             try:
-                _current_process = Process(
-                    target=main.start_system_client,
-                    args=(builtins.schedule_queues.system.queue,
-                          getattr(settings, 'SYSTEM_PROCESS_LOG_FILE')), daemon=True)
+                _current_process = SystemScheduleProcess(
+                    builtins.schedule_queues.system.queue,
+                    log_file=getattr(settings, 'SYSTEM_PROCESS_LOG_FILE'))
                 _current_process.start()
             except Exception as e:
                 error = str(e)
