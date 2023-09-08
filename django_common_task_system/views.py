@@ -464,3 +464,8 @@ class ExceptionReportView(CreateAPIView):
         meta = self.request.META
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
         serializer.save(ip=ip)
+
+
+@api_view(['GET'])
+def update_settings(request):
+    pass

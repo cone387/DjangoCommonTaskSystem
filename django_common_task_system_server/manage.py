@@ -25,13 +25,13 @@ def create_superuser():
         user.save()
 
 
-def start_server(migrate=False, createsuperuser=False):
+def start_server(migrate=False, createsuperuser=False, address=''):
     if migrate:
         execute_from_command_line(sys.argv[:1] + ['makemigrations'])
         execute_from_command_line(sys.argv[:1] + ['migrate'])
     if createsuperuser:
         create_superuser()
-    execute_from_command_line(sys.argv[:1] + ['runserver'])
+    execute_from_command_line(sys.argv[:1] + ['runserver', address or '0.0.0.0:8000'])
 
 
 def stop_server(executables=None):
@@ -74,18 +74,19 @@ def main():
             shutil.copy(DJANGO_SETTINGS_MODULE, os.path.abspath(
                 os.path.join(os.path.dirname(__file__), 'server/custom_settings.py')
             ))
-            os.environ['DJANGO_SETTINGS_MODULE'] = 'django_common_task_system_server.server.custom_settings'
+            os.environ['DJANGO_SETTINGS_MODULE'] = 'server.custom_settings'
         else:
             os.environ['DJANGO_SETTINGS_MODULE'] = DJANGO_SETTINGS_MODULE
     else:
-        os.environ['DJANGO_SETTINGS_MODULE'] = 'django_common_task_system_server.server.settings'
+        os.environ['DJANGO_SETTINGS_MODULE'] = 'server.settings'
     parser = argparse.ArgumentParser()
     parser.add_argument('option', nargs='?', default='')
     parser.add_argument('--migrate', action='store_true', default=False)
     parser.add_argument('--createsuperuser', action='store_true', default=False)
+    parser.add_argument('--address', type=str, default='')
     args, _ = parser.parse_known_args()
     if args.option == 'start':
-        start_server(migrate=args.migrate, createsuperuser=args.createsuperuser)
+        start_server(migrate=args.migrate, createsuperuser=args.createsuperuser, address=args.address)
     elif args.option == 'stop':
         stop_server()
     elif args.option == 'reload':

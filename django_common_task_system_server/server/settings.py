@@ -28,19 +28,25 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
+APPS_ORDER_LIST = [
+    'django_common_objects',
+    'django_common_task_system',
+    'auth'
+]
 
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
+    'server.apps.SystemAdminConfig',
+    # 'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'rest_framework',
     'django_common_objects',
     'django_common_task_system',
-    'django_common_task_system.system_task',
 ]
 
 MIDDLEWARE = [
@@ -53,7 +59,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'django_common_task_system_server.server.urls'
+ROOT_URLCONF = 'server.urls'
 
 TEMPLATES = [
     {
@@ -71,7 +77,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'django_common_task_system_server.server.wsgi.application'
+WSGI_APPLICATION = 'server.wsgi.application'
 
 
 # Database
@@ -119,7 +125,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.1/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'static')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.1/ref/settings/#default-auto-field
