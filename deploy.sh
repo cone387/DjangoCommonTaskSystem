@@ -1,11 +1,12 @@
 #/bin/bash
 
-OPTIONS_SHORT="t:p:"
-OPTIONS_LONG="to:port:,help"
+OPTIONS_SHORT="t:p:s:"
+OPTIONS_LONG="to:port:setting:,help"
 
 DEPLOY_TO="pypi";
 PROJECT="django-common-task-system";
 PORT=8000;
+SETTING='';
 
 if ! ARGS=$(getopt -o $OPTIONS_SHORT --long $OPTIONS_LONG -n "$0" -- "$@"); then
   echo "Terminating..."
@@ -19,15 +20,20 @@ while true;
 do
     case $1 in
         -t|--to)
-            echo "DEPLOY_TO: $2;"
-            DEPLOY_TO=$2;
-            shift 2
-            ;;
+          echo "DEPLOY_TO: $2;"
+          DEPLOY_TO=$2;
+          shift 2
+          ;;
         -p|--port)
-            echo "PORT: $2;"
-            PORT=$2;
-            shift 2
-            ;;
+          echo "PORT: $2;"
+          PORT=$2;
+          shift 2
+          ;;
+        -s|--setting)
+          echo "setting.py: $2;"
+          SETTING=$2;
+          shift 2
+          ;;
         --)
           break
           ;;
@@ -56,6 +62,34 @@ function deploy_to_docker() {
 
 
 function deploy_to_server() {
+  if [ "$SETTING" != "" ];
+  then
+    if [ ! -f "$SETTING" ];
+    then
+      echo "SETTING<$SETTING> does not exist"
+      exit 1
+    fi
+    server_path="/etc/django-common-task-system/";
+    if [ "$context" != "default" -a "$context" != "" ];
+    then
+      # docker context 为其它服务器, 先将配置文件拷贝到服务器上
+      server=$(docker context inspect | grep -o 'Host.*' | sed 's/.*: "ssh:\/\/\(.*\)".*/\1/')
+      echo "server is $server"
+      if [ "$server" = "" ];
+      then
+        exit 1
+      fi
+      ssh server "mkdir -p $server_path"
+      scp $SETTING $server:$server_path;
+    else
+      # docker context 为本地, 直接将配置文件拷贝到本地server_path
+      echo "cp -f $SETTING $server_path"
+      cp -f $SETTING $server_path
+    fi
+    VOLUME="-v $server_path:/home/django-common-task-system/configs"
+    ENV="-e DJANGO_SETTINGS_MODULE=configs.$(basename $SETTING .py)";
+  fi
+
   echo "Deploying to server..."
   cid=`docker ps -a | grep $PROJECT | awk '{print $1}'`
   for c in $cid
@@ -63,8 +97,10 @@ function deploy_to_server() {
         docker stop $c
         docker rm $c
     done
+  echo "docker build -t $PROJECT ."
   docker build -t $PROJECT .
-  docker run -d --name $PROJECT -p $PORT:8000 django-common-task-system
+  echo "docker run -d -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT"
+  docker run -d -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT
 }
 
 if [ "$DEPLOY_TO" = 'pypi' ];
