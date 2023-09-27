@@ -78,19 +78,6 @@ class Categories(BuiltinModels):
         super(Categories, self).__init__()
 
 
-class ScheduleCallbacks(BuiltinModels):
-    model = ScheduleCallback
-    model_unique_kwargs = ['name']
-
-    def __init__(self):
-        self.log_upload = self.model(
-            name='日志上报',
-            trigger_event=ScheduleCallbackEvent.DONE,
-            status=ScheduleCallbackStatus.ENABLE.value,
-        )
-        super(ScheduleCallbacks, self).__init__()
-
-
 class ScheduleQueues(BuiltinModels):
     status_params_mapping = {
         ScheduleStatus.OPENING.value: 'opening',
@@ -346,8 +333,7 @@ class Schedules(BuiltinModels):
     model_unique_kwargs = ['task']
     model = ScheduleModel
 
-    def __init__(self, tasks: Tasks, callbacks: ScheduleCallbacks):
-        self.callbacks = callbacks
+    def __init__(self, tasks: Tasks):
         self.log_clean = self.model(
             status=ScheduleStatus.AUTO,
             task=tasks.log_clean,
@@ -432,11 +418,6 @@ class Schedules(BuiltinModels):
 
         super(Schedules, self).__init__()
 
-    def init_object(self, obj):
-        obj.callback = self.callbacks.log_upload
-        obj = super(Schedules, self).init_object(obj)
-        return obj
-
 
 class Builtins:
 
@@ -444,10 +425,9 @@ class Builtins:
         self._initialized = False
         self.categories = Categories()
         self.schedule_queues = ScheduleQueues()
-        self.schedule_callbacks = ScheduleCallbacks()
         self.schedule_producers = ScheduleProducers(self.schedule_queues)
         self.tasks = Tasks(self.categories, self.schedule_queues)
-        self.schedules = Schedules(self.tasks, self.schedule_callbacks)
+        self.schedules = Schedules(self.tasks)
         self.schedule_queue_permissions = ScheduleQueuePermissions()
 
     @staticmethod

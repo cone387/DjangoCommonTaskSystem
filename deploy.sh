@@ -1,12 +1,15 @@
 #/bin/bash
 
-OPTIONS_SHORT="t:p:s:"
-OPTIONS_LONG="to:port:setting:,help"
+OPTIONS_SHORT="t:p:s:u:i"
+OPTIONS_LONG="to:,port:,setting:,user:,pwd:,init,gunicorn,help"
 
-DEPLOY_TO="pypi";
+DEPLOY_TO="server";
 PROJECT="django-common-task-system";
 PORT=8000;
 SETTING='';
+SET_USER='';
+SET_PASSWORD='';
+INIT="false";
 
 if ! ARGS=$(getopt -o $OPTIONS_SHORT --long $OPTIONS_LONG -n "$0" -- "$@"); then
   echo "Terminating..."
@@ -33,6 +36,26 @@ do
           echo "setting.py: $2;"
           SETTING=$2;
           shift 2
+          ;;
+        -u|--user)
+          echo "SET_USER: $2;"
+          SET_USER=$2;
+          shift 2
+          ;;
+        --pwd)
+          echo "SET_PASSWORD: $2;"
+          SET_PASSWORD=$2;
+          shift 2
+          ;;
+        -i|--init)
+          echo "INIT: true;"
+          INIT="true";
+          shift
+          ;;
+        --gunicorn)
+          echo "USE_GUNICORN: true;"
+          USE_GUNICORN="true";
+          shift
           ;;
         --)
           break
@@ -90,6 +113,30 @@ function deploy_to_server() {
     ENV="-e DJANGO_SETTINGS_MODULE=configs.$(basename $SETTING .py)";
   fi
 
+  if [ "$INIT" == "true" ]
+  then
+    INIT_ENV="-e INIT=$INIT"
+  else
+    INIT_ENV=""
+  fi
+  if [ "$SET_USER" != "" -a "$SET_PASSWORD" != "" ]
+  then
+    SET_USER_ENV="-e SET_USER=$SET_USER"
+    SET_PASSWORD_ENV="-e SET_PASSWORD=$SET_PASSWORD"
+  elif [ "$SET_USER" != "" ];
+  then
+    echo "You must set password for user $SET_USER"
+    exit 1
+  else
+    SET_USER_ENV=""
+    SET_PASSWORD_ENV=""
+  fi
+  if [ "$USE_GUNICORN" == "true" ]
+  then
+    GUNICORN_ENV="-e USE_GUNICORN=$USE_GUNICORN"
+  else
+    GUNICORN_ENV=""
+  fi
   echo "Deploying to server..."
   cid=`docker ps -a | grep $PROJECT | awk '{print $1}'`
   for c in $cid
@@ -99,8 +146,8 @@ function deploy_to_server() {
     done
   echo "docker build -t $PROJECT ."
   docker build -t $PROJECT .
-  echo "docker run -d -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT"
-  docker run -d -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT
+  echo "docker run -d -v /etc/ -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $INIT_ENV $SET_USER_ENV $SET_PASSWORD_ENV $GUNICORN_ENV $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT"
+  docker run -d -v /etc/django-common-task-system/static/:/home/django-common-task-system/django_common_task_system_server/static/ -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $INIT_ENV $SET_USER_ENV $SET_PASSWORD_ENV $GUNICORN_ENV $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT
 }
 
 if [ "$DEPLOY_TO" = 'pypi' ];

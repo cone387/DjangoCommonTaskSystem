@@ -7,12 +7,12 @@ import argparse
 from django.core.management import execute_from_command_line
 
 
-def create_superuser():
+def create_superuser(username=None, password=None):
     import django
     django.setup()
     from django.contrib.auth.models import User
-    username = 'root'
-    password = '3.1415926'
+    username = username or 'root'
+    password = password or '3.1415926'
     user, created = User.objects.get_or_create(
         username=username,
         defaults={
@@ -23,15 +23,20 @@ def create_superuser():
     if created:
         user.set_password(password)
         user.save()
+        print('superuser created: %s' % username)
 
 
-def start_server(migrate=False, createsuperuser=False, address=''):
-    if migrate:
+def init_server(args=None):
+    if args and args.migrate:
         execute_from_command_line(sys.argv[:1] + ['makemigrations'])
         execute_from_command_line(sys.argv[:1] + ['migrate'])
-    if createsuperuser:
-        create_superuser()
-    execute_from_command_line(sys.argv[:1] + ['runserver', address or '0.0.0.0:8000'])
+    if args and args.createsuperuser:
+        create_superuser(args.user, args.password)
+
+
+def start_server(args=None):
+    init_server(args)
+    execute_from_command_line(sys.argv[:1] + ['runserver', args.address if args and args.address else '0.0.0.0:8000'])
 
 
 def stop_server(executables=None):
@@ -84,9 +89,13 @@ def main():
     parser.add_argument('--migrate', action='store_true', default=False)
     parser.add_argument('--createsuperuser', action='store_true', default=False)
     parser.add_argument('--address', type=str, default='')
+    parser.add_argument('-u', '--user', type=str)
+    parser.add_argument('-p', '--password', type=str)
     args, _ = parser.parse_known_args()
-    if args.option == 'start':
-        start_server(migrate=args.migrate, createsuperuser=args.createsuperuser, address=args.address)
+    if args.option == 'init':
+        init_server(args)
+    elif args.option == 'start':
+        start_server(args)
     elif args.option == 'stop':
         stop_server()
     elif args.option == 'reload':
@@ -96,4 +105,6 @@ def main():
 
 
 if __name__ == '__main__':
+    import os
+    print(os.environ['PYTHONPATH'])
     main()

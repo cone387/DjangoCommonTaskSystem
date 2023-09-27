@@ -223,8 +223,6 @@ class ScheduleForm(forms.ModelForm):
                     self.initial['timing_year'] = timing_config.get('year')
                 elif timing_type == ScheduleTimingType.DATETIME:
                     self.initial['timing_datetime'] = timing_config.get('datetime')
-        else:
-            self.initial['callback'] = builtins.schedule_callbacks.log_upload
 
     def clean(self):
         cleaned_data = super(ScheduleForm, self).clean()

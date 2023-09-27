@@ -29,9 +29,9 @@ RUN pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/s
 # 安装项目依赖
 RUN pip install -r requirements.txt
 
-WORKDIR $PROJECT_DIR/django_common_task_system_server
-
+#WORKDIR $PROJECT_DIR/django_common_task_system_server
+ENTRYPOINT ./entrypoint.sh
 # demo就不用gunicorn启动了， 因为guniorn不会代理静态文件
-ENTRYPOINT python manage.py collectstatic --noinput && python manage.py start --migrate --createsuperuser
+#ENTRYPOINT python manage.py collectstatic --noinput && python manage.py start --migrate --createsuperuser
 
 #ENTRYPOINT python manage.py collectstatic --noinput && gunicorn server.wsgi:application --bind 0.0.0.0:8000
