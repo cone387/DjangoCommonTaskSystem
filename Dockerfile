@@ -30,7 +30,7 @@ RUN pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/s
 RUN pip install -r requirements.txt
 
 #WORKDIR $PROJECT_DIR/django_common_task_system_server
-ENTRYPOINT ./entrypoint.sh
+ENTRYPOINT ["/bin/bash", "entrypoint.sh"]
 # demo就不用gunicorn启动了， 因为guniorn不会代理静态文件
 #ENTRYPOINT python manage.py collectstatic --noinput && python manage.py start --migrate --createsuperuser
 

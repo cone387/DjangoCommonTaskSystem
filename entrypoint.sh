@@ -15,7 +15,7 @@ function start() {
   if [ "$USE_GUNICORN" == "true" ]
   then
     echo "Starting with gunicorn..."
-    gunicorn server.wsgi:application --bind 0.0.0.0:8000
+    gunicorn -c gunicorn_config.py server.wsgi:application --preload
   else
     echo "Starting with django..."
     python manage.py runserver 0.0.0.0:8000
@@ -26,6 +26,7 @@ function main() {
   cd django_common_task_system_server
   echo "INIT is $INIT"
   echo "SET_USER is $SET_USER"
+  export RUN_MAIN="false"
   if [ "$INIT" == "true" ]
   then
       migrate
@@ -39,6 +40,7 @@ function main() {
       exit 1
   fi
   python manage.py collectstatic --noinput
+  RUN_MAIN="true"
   start
 }
 

@@ -441,7 +441,7 @@ class Builtins:
     def initialize(self):
         if not self._initialized:
             self._initialized = True
-            if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
+            if os.environ.get('RUN_MAIN') == 'true' and (os.environ.get('USE_GUNICORN') or 'true') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
                 print('初始化内置任务...')
                 self.init_user()
                 for i in self.__dict__.values():

@@ -147,7 +147,10 @@ function deploy_to_server() {
   echo "docker build -t $PROJECT ."
   docker build -t $PROJECT .
   echo "docker run -d -v /etc/ -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $INIT_ENV $SET_USER_ENV $SET_PASSWORD_ENV $GUNICORN_ENV $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT"
-  docker run -d -v /etc/django-common-task-system/static/:/home/django-common-task-system/django_common_task_system_server/static/ -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $INIT_ENV $SET_USER_ENV $SET_PASSWORD_ENV $GUNICORN_ENV $ENV  -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT
+  docker run -d -v /etc/django-common-task-system/static/:/home/django-common-task-system/django_common_task_system_server/static/ \
+                -v /etc/django-common-task-system/logs/:/home/django-common-task-system/django_common_task_system_server/logs/ \
+                -v /var/run/docker.sock:/var/run/docker.sock $VOLUME $INIT_ENV $SET_USER_ENV $SET_PASSWORD_ENV $GUNICORN_ENV $ENV \
+                -p $PORT:8000 --log-opt max-size=100m --name django-common-task-system $PROJECT
 }
 
 if [ "$DEPLOY_TO" = 'pypi' ];
