@@ -4,11 +4,13 @@ from threading import Thread
 from django.db import connection
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django_common_objects.models import CommonCategory
 from jionlp_time import parse_time
 from rest_framework import status
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import NotFound
 from rest_framework.generics import CreateAPIView, RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,7 +29,6 @@ from . import models, system_initialized_signal
 from . import client as schedule_client
 from typing import List, Dict, Union
 import os
-import signal
 
 
 User = models.UserModel
@@ -40,6 +41,7 @@ ScheduleSerializer = get_schedule_serializer()
 @receiver(system_initialized_signal, sender='system_initialized')
 def on_system_initialized(sender, **kwargs):
     schedule_client.start_system_process()
+    schedule_client.start_schedule_thread()
 
 
 def on_system_shutdown(signum, frame):
@@ -91,16 +93,15 @@ def delete_task(sender, instance: Task, **kwargs):
 
 @receiver(post_save, sender=models.TaskClient)
 def add_client(sender, instance: models.TaskClient, created, **kwargs):
-    thread = Thread(target=schedule_client.start_client, args=(instance,))
-    thread.start()
-
+    # thread = Thread(target=schedule_client.start_client, args=(instance,))
+    # thread.start()
+    schedule_client.start_client(instance)
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
         development server in single-threaded mode:
         $ python manage.py  runserver --nothreading --noreload
     """
-
 
 # for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
 #     if sig is not None:
@@ -316,46 +317,65 @@ class ScheduleClientView:
     @api_view(['GET'])
     def action(request: Request, action: str):
         if action == 'start':
-            return ScheduleClientView.start_client()
-        elif action == 'stop':
-            return ScheduleClientView.stop_client()
-        elif action == 'log':
-            return ScheduleClientView.show_logs(request)
-        else:
-            return HttpResponse('invalid action: %s' % action)
-
-    @staticmethod
-    def show_logs(request: Request, client_id: int):
-        # 此处pk为进程id
-        client: TaskClient = TaskClient.objects.get(client_id)
-        if client is None:
-            return HttpResponse('TaskClient(%s)不存在' % client_id)
-        if client.startup_status != TaskClientStatus.SUCCEED:
-            return HttpResponse(client.startup_log, content_type='text/plain; charset=utf-8')
-        logs = client.container.logs(tail=1000)
-        return HttpResponse(logs, content_type='text/plain; charset=utf-8')
-
-    @staticmethod
-    @api_view(['GET'])
-    def start_client():
-        try:
             client = TaskClient.objects.create()
-            return Response('TaskClient(%s)启动成功' % client.id)
-        except Exception as e:
-            return Response('启动TaskClient失败: %s' % e, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({'client_id': client.id})
+        if action == 'register':
+            return ScheduleClientView.register_client(request)
+        client_id = request.GET.get('client_id', '')
+        if not client_id.isdigit():
+            return Response({'error': 'invalid client_id: %s' % client_id}, status=status.HTTP_400_BAD_REQUEST)
+        client: TaskClient = TaskClient.objects.get(int(client_id))
+        if client is None:
+            raise NotFound('TaskClient(%s)不存在' % client_id)
+        if action == 'stop':
+            client.delete()
+            return Response({'message': 'stop client(%s) success' % client_id})
+        elif action == 'log':
+            if client.startup_status == TaskClientStatus.RUNNING.value:
+                log = client.runner.read_log()
+            else:
+                log = client.startup_log
+            return HttpResponse(log, content_type='text/plain; charset=utf-8')
+        else:
+            return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
 
     @staticmethod
-    @api_view(['GET'])
-    def stop_client(request: Request, client_id: int):
-        client = TaskClient.objects.get(pk=client_id)
-        if client is None:
-            return Response('TaskClient(%s)不存在' % client_id, status=status.HTTP_404_NOT_FOUND)
-        try:
-            client.delete()
-            return Response('TaskClient(%s)已停止' % client_id)
-        except Exception as e:
-            return Response('停止TaskClient(%s)失败: %s' % (client_id, e),
-                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    def register_client(request: Request):
+        """
+        container: Container = None
+        group = models.CharField(max_length=100, verbose_name='分组')
+        subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
+        subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
+        client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+        process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
+        container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
+        container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
+        container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
+        container_status = models.CharField(choices=ContainerStatus.choices, default=ContainerStatus.NONE,
+                                            max_length=20, verbose_name='容器状态')
+        run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
+        env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
+        startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
+                                          verbose_name='启动结果', default=TaskClientStatus.SUCCEED)
+        settings = models.TextField(verbose_name='配置', blank=True, null=True)
+        create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+        startup_log = models.CharField(max_length=2000, null=True, blank=True)
+        """
+        data = request.data
+        settings = data.get('settings')
+        container_id = data.get('container_id')
+        subscription_url = data.get('subscription_url')
+        subscription_kwargs = data.get('subscription_kwargs')
+        process_id = data.get('process_id')
+        client = TaskClient(container_id=container_id,
+                            subscription_url=subscription_url,
+                            startup_log='启动成功',
+                            settings=settings,
+                            process_id=process_id,
+                            )
+        client.save()
+        return Response('上报成功')
 
     @staticmethod
     @api_view(['GET'])
@@ -365,20 +385,50 @@ class ScheduleClientView:
         elif action == 'stop':
             error = schedule_client.stop_system_process()
         elif action == 'log':
-            page: str = request.query_params.get('page', '1')
+            page: str = request.query_params.get('page', '0')
             size: str = request.query_params.get('size', '1024')
             if page.isdigit() and size.isdigit():
-                text = schedule_client.read_system_process_log(int(page), int(size) * 1024)
-                return HttpResponse(text, content_type='text/plain; charset=utf-8')
-            return Response(f'invalid page({page}) or size({size})', status=status.HTTP_400_BAD_REQUEST)
+                paged_log = schedule_client.read_system_process_log(int(size) * 1024)
+                return render(request, 'log_view.html', {
+                    'paged_log': paged_log,
+                    'logs': paged_log.read_page(int(page)).split('\n'),
+                })
+            return Response({'error': f'invalid page({page}) or size({size})'}, status=status.HTTP_400_BAD_REQUEST)
         elif action == 'restart':
             error = schedule_client.restart_system_process()
         else:
-            return Response('invalid action: %s' % action, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'invalid action: %s, only support start/stop/restart/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
         if error:
             return Response(error, status=status.HTTP_400_BAD_REQUEST)
         process = getattr(schedule_client.current_process(), 'pid', None)
         return Response({"msg": f"操作({action})成功", "process": process})
+
+    @staticmethod
+    @api_view(['GET'])
+    def schedule_thread_action(request: Request, action: str):
+        if action == 'start':
+            error = schedule_client.start_schedule_thread()
+        elif action == 'stop':
+            error = schedule_client.stop_schedule_thread()
+        elif action == 'log':
+            page: str = request.query_params.get('page', '0')
+            page_size: str = request.query_params.get('page_size', '1')
+            if page.isdigit() and page_size.isdigit():
+                paged_log = schedule_client.read_schedule_thread_log(int(page_size) * 1024)
+                return render(request, 'log_view.html', {
+                    'paged_log': paged_log,
+                    'logs': paged_log.read_page(int(page)).split('\n'),
+                })
+            return Response({'error': f'invalid page({page}) or page_size({page_size})'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        else:
+            return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if error:
+            return Response(error, status=status.HTTP_400_BAD_REQUEST)
+        thread = getattr(schedule_client.current_schedule_thread(), 'ident', None)
+        return Response({"msg": f"操作({action})成功", "process": thread})
 
 
 class TaskListView(UserListAPIView):
@@ -414,3 +464,8 @@ class ExceptionReportView(CreateAPIView):
         meta = self.request.META
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
         serializer.save(ip=ip)
+
+
+@api_view(['GET'])
+def update_settings(request):
+    pass

@@ -1,7 +1,7 @@
 
 import inspect
 import os
-import time
+import re
 from django import forms
 from django.conf import settings
 from django.contrib.admin import widgets
@@ -16,6 +16,7 @@ from django.urls import reverse
 from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
 from django_common_task_system.utils.cache import ttl_cache
+from .choices import ClientEngineType
 from . import models
 from .builtins import builtins
 from . import get_schedule_model, get_task_model
@@ -222,8 +223,6 @@ class ScheduleForm(forms.ModelForm):
                     self.initial['timing_year'] = timing_config.get('year')
                 elif timing_type == ScheduleTimingType.DATETIME:
                     self.initial['timing_datetime'] = timing_config.get('datetime')
-        else:
-            self.initial['callback'] = builtins.schedule_callbacks.log_upload
 
     def clean(self):
         cleaned_data = super(ScheduleForm, self).clean()
@@ -356,15 +355,14 @@ SETTINGS_TEMPLATE = """
 
 
 class TaskClientForm(forms.ModelForm):
-    run_in_container = forms.BooleanField(label='在容器中运行', initial=True, required=False, widget=forms.HiddenInput())
-    system_subscription_url = forms.ChoiceField(label='系统订阅地址', required=False)
-    system_subscription_scheme = forms.ChoiceField(label='系统订阅Scheme',
-                                                   choices={x: x for x in ['http', 'https']}.items())
-    system_subscription_host = forms.ChoiceField(label='系统订阅Host')
-    system_subscription_port = forms.IntegerField(label='系统订阅Port', initial=80, min_value=1, max_value=65535)
+    machine = forms.ChoiceField(label='机器')
+    subscription_url = forms.ChoiceField(label='订阅地址', required=False)
+    subscription_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
+    subscription_host = forms.ChoiceField(label='订阅Host')
+    subscription_port = forms.IntegerField(label='订阅Port', initial=80, min_value=1, max_value=65535)
     custom_subscription_url = forms.CharField(
         max_length=300, label='自定义订阅地址', widget=forms.TextInput(
-            attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/task/subscription/'}),
+            attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/schedule/subscription/'}),
         required=False, help_text="如果选择了此项，将使用此地址作为订阅地址，忽略选择的系统订阅地址"
     )
     subscription_kwargs = forms.CharField(max_length=500, label='订阅参数', widget=forms.Textarea(
@@ -399,8 +397,7 @@ class TaskClientForm(forms.ModelForm):
         for obj in queryset:
             path = reverse('schedule-get', kwargs={'code': obj.code})
             subscription_url_choices.append((path, obj.name))
-        self.fields['system_subscription_url'].choices = subscription_url_choices
-
+        self.fields['subscription_url'].choices = subscription_url_choices
         intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
         internet_ip = self.get_internet_ip()
         ip_choices = (
@@ -408,11 +405,27 @@ class TaskClientForm(forms.ModelForm):
             (internet_ip, "%s(外网)" % internet_ip),
             ('127.0.0.1', '127.0.0.1')
         )
-        self.fields['system_subscription_host'].choices = ip_choices
-        self.initial['system_subscription_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
+        self.fields['subscription_host'].choices = ip_choices
+        self.fields['machine'].choices = self.get_machine_choices()
+        self.initial['subscription_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
-    def _post_clean(self):
-        pass
+    @staticmethod
+    def get_machine_choices():
+        machines = {}
+        for o in models.TaskClient.objects.all():
+            machines.setdefault(o.machine_ip, []).append(o)
+        choices = []
+        for ip, clients in machines.items():
+            choices.append(("%s-%s" % (ip, clients[0].machine_name),
+                            "%s(%s)%s clients running" % (ip, clients[0].machine_name, len(clients))))
+        intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
+        internet_ip = TaskClientForm.get_internet_ip()
+        for ip in (intranet_ip, internet_ip, '127.0.0.1'):
+            if ip in machines:
+                break
+        else:
+            choices.append(('127.0.0.1-本机', "127.0.0.1(本机)0 clients running"))
+        return choices
 
     @staticmethod
     @ttl_cache()
@@ -423,40 +436,40 @@ class TaskClientForm(forms.ModelForm):
             return "获取失败: %s" % str(e)[:50]
 
     @staticmethod
-    def validate_settings(client):
+    def validate_settings(setting_str, setting_dict):
         try:
-            exec(client.settings, None, client.settings_module)
+            exec(setting_str, None, setting_dict)
         except Exception as e:
             raise forms.ValidationError('settings参数错误: %s' % e)
+        
+    def _post_clean(self):
+        pass
 
     def clean(self):
         cleaned_data = super(TaskClientForm, self).clean()
         if self.errors:
             return cleaned_data
         client: models.TaskClient = self.instance
-        for f in models.TaskClient._meta.fields:
-            setattr(client, f.name, cleaned_data.get(f.name))
+        client.machine_ip, client.machine_name = cleaned_data['machine'].split('-', 1)
         client.subscription_url = cleaned_data.get('custom_subscription_url') or urljoin(
-            "%s://%s:%s" % (cleaned_data.get('system_subscription_scheme'),
-                            cleaned_data.get('system_subscription_host'),
-                            cleaned_data.get('system_subscription_port')),
-            cleaned_data.get('system_subscription_url'))
+            "%s://%s:%s" % (cleaned_data.get('subscription_scheme'),
+                            cleaned_data.get('subscription_host'),
+                            cleaned_data.get('subscription_port')),
+            cleaned_data.get('subscription_url'))
         if client.subscription_url.startswith('redis'):
             if not client.subscription_kwargs.get('queue'):
                 raise forms.ValidationError('queue is required for redis subscription')
         if client.subscription_url.startswith('mysql'):
             if not client.subscription_kwargs.get('command'):
                 raise forms.ValidationError('command is required for mysql subscription')
-        if not client.settings:
-            self.add_error('settings', 'settings不能为空')
-        self.validate_settings(client)
-        if client.run_in_container:
-            if not client.container_image:
-                client.container_image = 'cone387/common-task-system-client:latest'
-            if not client.container_name:
-                client.container_name = 'common-task-system-client-%s' % time.strftime("%Y%m%d%H%M%S")
-            # with open(client.settings_file, 'w', encoding='utf-8') as f:
-            #     f.write(client.settings)
+        client.engine_type = cleaned_data['engine_type']
+        if client.engine_type == ClientEngineType.DOCKER:
+            client.engine_settings = {
+                'image': cleaned_data['container_image'],
+                'container_name': cleaned_data['container_name'],
+                'container_id': cleaned_data['container_id'],
+            }
+        self.validate_settings(cleaned_data['settings'], client.settings)
         return cleaned_data
 
     class Meta:

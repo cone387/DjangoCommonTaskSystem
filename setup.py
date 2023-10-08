@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name='django-common-task-system',
     packages=find_packages(exclude=['local_tests', 'tests']),
-    version='1.3.5',
+    version='2.0.0',
     install_requires=[
         "django-common-objects>=1.0.8",
         "django>=3.2.18",

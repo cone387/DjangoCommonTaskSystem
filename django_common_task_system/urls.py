@@ -21,11 +21,8 @@ urlpatterns = [
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
 
     path('client/system/<slug:action>/', views.ScheduleClientView.system_process_action, name='system-process-action'),
-    path('client/<slug:action>/', views.ScheduleClientView.action, name='schedule-client-action'),
-
-
-    path('client/log/<int:client_id>/', views.ScheduleClientView.show_logs, name='schedule-client-log'),
-    path('client/start/', views.ScheduleClientView.start_client, name='schedule-client-start'),
-    path('client/stop/<int:client_id>/', views.ScheduleClientView.stop_client, name='schedule-client-stop'),
+    path('client/schedule/<slug:action>/', views.ScheduleClientView.schedule_thread_action,
+         name='schedule-thread-action'),
+    path('client/<slug:action>/', views.ScheduleClientView.action, name='client-action'),
 
 ] + router.urls

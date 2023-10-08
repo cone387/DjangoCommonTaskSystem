@@ -15,16 +15,23 @@ RUN apt-get install curl -y
 RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
 RUN python get-pip.py
 
+ENV PROJECT_DIR /home/django-common-task-system
+ENV PYTHONPATH "${PYTHONPATH}:$PROJECT_DIR"
+
+# 设置工作目录
+WORKDIR $PROJECT_DIR
+
+# 复制项目文件到容器
+COPY . $PROJECT_DIR
+
 ## 2. 安装依赖
 RUN pip config --global set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-RUN pip install asgiref>=3.6.0
-RUN pip install croniter>=1.3.8
-RUN pip install Django==4.1.7
-RUN pip install django-common-objects>=1.0.7
-RUN pip install djangorestframework>=3.14.0
-RUN pip install jionlp-time>=1.0.0
-RUN pip install python-dateutil>=2.8.2
-RUN pip install pytz>=2022.7.1
-RUN pip install six>=1.16.0
-RUN pip install sqlparse>=0.4.3
-RUN pip install tzdata>=2022.7
+# 安装项目依赖
+RUN pip install -r requirements.txt
+
+#WORKDIR $PROJECT_DIR/django_common_task_system_server
+ENTRYPOINT ["/bin/bash", "entrypoint.sh"]
+# demo就不用gunicorn启动了， 因为guniorn不会代理静态文件
+#ENTRYPOINT python manage.py collectstatic --noinput && python manage.py start --migrate --createsuperuser
+
+#ENTRYPOINT python manage.py collectstatic --noinput && gunicorn server.wsgi:application --bind 0.0.0.0:8000

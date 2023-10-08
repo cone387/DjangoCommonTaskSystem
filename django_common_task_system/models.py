@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ContainerStatus,
+    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ClientEngineType,
     PermissionType, ExecuteStatus, ScheduleExceptionReason
 )
 from django_common_objects.models import CommonTag, CommonCategory
@@ -13,12 +13,11 @@ from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.schedule import util as schedule_util
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
-from docker.models.containers import Container
 import os
 import re
 
@@ -337,33 +336,74 @@ class CustomManager(models.Manager, dict):
     def none(self):
         return QuerySet([], self.model)
 
+    def count(self):
+        return len(self)
+
     def __get__(self, instance, owner):
         return self._meta.managers_map[self.manager.name]
 
 
+class ClientEngine:
+    def __init__(self, engine_settings: dict):
+        self.engine_settings = engine_settings
+
+    def __setattr__(self, key, value):
+        if key == 'engine_settings':
+            super().__setattr__(key, value)
+            return
+        o = self.engine_settings.get(key)
+        if o is not None and o != value:
+            self.engine_settings[key] = value
+        super().__setattr__(key, value)
+
+
+class DockerEngine(ClientEngine):
+    def __init__(self, engine_settings: dict):
+        super().__init__(engine_settings)
+        self.container_id = engine_settings.get('container_id')
+        self.container_name = engine_settings.get(
+            'container_name') or 'common-task-system-client-%s' % datetime.now().strftime("%Y%m%d%H%M%S")
+        self.image = engine_settings.get('image') or 'cone387/common-task-system-client:latest'
+        self.container_ip = engine_settings.get('container_ip')
+        self.container_port = engine_settings.get('container_port')
+        self.container_status = engine_settings.get('container_status')
+        self.container_create_time = engine_settings.get('container_create_time')
+
+
+class ProcessEngine(ClientEngine):
+    pass
+
+
 class TaskClient(models.Model):
-    container: Container = None
-    group = models.CharField(max_length=100, verbose_name='分组')
+    # 两种运行模式: 容器模式，进程模式
+    runner = None
+
+    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
+    machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+    group = models.CharField(max_length=100, verbose_name='分组', default='默认')
     subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
     subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
-    process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
-    container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
-    container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
-    container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
-    container_status = models.CharField(choices=ContainerStatus.choices, default=ContainerStatus.NONE,
-                                        max_length=20, verbose_name='容器状态')
-    run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
+    engine_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ClientEngineType.choices,
+                                   default=ClientEngineType.DOCKER)
+    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
-                                      verbose_name='启动结果', default=TaskClientStatus.SUCCEED)
-    settings = models.TextField(verbose_name='配置', blank=True, null=True)
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+                                      verbose_name='启动结果', default=TaskClientStatus.RUNNING)
     startup_log = models.CharField(max_length=2000, null=True, blank=True)
-
-    settings_module = {}
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    settings = models.JSONField(verbose_name='客户端设置', default=dict)
 
     objects = CustomManager()
+
+    @property
+    def engine(self):
+        if self.engine_type == ClientEngineType.DOCKER:
+            return DockerEngine(self.engine_settings)
+        elif self.engine_type == ClientEngineType.PROCESS:
+            return ProcessEngine(self.engine_settings)
+        else:
+            raise ValueError("Invalid engine_type: %s" % self.engine_type)
 
     class Meta:
         managed = False
@@ -374,7 +414,7 @@ class TaskClient(models.Model):
 
     @cached_property
     def fp(self):
-        return get_md5("%s-%s" % (self.container_id, self.process_id))
+        return get_md5("%s" % self.runner.id if self.runner else self.client_id)
 
     @cached_property
     def settings_file(self):
@@ -395,10 +435,8 @@ class TaskClient(models.Model):
     ):
         if not self.client_id:
             self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
-        if self.group is None:
-            self.group = self.__class__.__name__
         TaskClient.objects[self.client_id] = self
-        if self.container is None:
+        if self.runner is None:
             self.create_time = timezone.now()
             post_save.send(
                 sender=TaskClient,
@@ -408,14 +446,11 @@ class TaskClient(models.Model):
                 raw=False,
                 using=using,
             )
-        else:
-            self.create_time = datetime.strptime(self.container.attrs['Created'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
 
     def delete(self, using=None, keep_parents=False):
-        if self.container is not None:
-            self.container.stop()
-            self.container.remove()
-        TaskClient.objects.pop(self.client_id)
+        if self.runner is not None:
+            self.runner.stop()
+        TaskClient.objects.pop(self.client_id, None)
 
 
 class ExceptionScheduleManager(CustomManager):
@@ -543,38 +578,6 @@ class RetrySchedule(ExceptionSchedule):
         managed = False
         verbose_name = verbose_name_plural = '待重试计划'
         ordering = ('id', '-schedule_time',)
-
-
-class OverviewManager(CustomManager):
-
-    def statistics(self):
-        self['client'] = Overview(
-            name="系统计划处理进程ID",
-            state=schedule_client.current_process().pid,
-            action="""
-                
-            """
-        )
-        self['schedule'] = Overview(
-            name="已启用计划数量",
-            state=Schedule.objects.filter(status=ScheduleStatus.OPENING).count(),
-            action="""
-                <a href="/admin/schedule/schedule/?status=opening">查看详情</a>
-            """
-        )
-        failed_count = schedule_util.get_failed_directly_records('opening').count() + \
-                       schedule_util.get_maximum_retries_exceeded_records('opening').count()
-        self['failed-schedule'] = Overview(
-            name="失败计划数量",
-            state=failed_count,
-            action="""
-                <a href="/admin/schedule/exceptionschedule/?reason=failed_directly">查看详情</a>
-            """
-        )
-
-    def all(self):
-        self.statistics()
-        return QuerySet(dict.values(self), self.model)
 
 
 class Overview(models.Model):

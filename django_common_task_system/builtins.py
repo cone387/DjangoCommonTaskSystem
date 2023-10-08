@@ -78,19 +78,6 @@ class Categories(BuiltinModels):
         super(Categories, self).__init__()
 
 
-class ScheduleCallbacks(BuiltinModels):
-    model = ScheduleCallback
-    model_unique_kwargs = ['name']
-
-    def __init__(self):
-        self.log_upload = self.model(
-            name='日志上报',
-            trigger_event=ScheduleCallbackEvent.DONE,
-            status=ScheduleCallbackStatus.ENABLE.value,
-        )
-        super(ScheduleCallbacks, self).__init__()
-
-
 class ScheduleQueues(BuiltinModels):
     status_params_mapping = {
         ScheduleStatus.OPENING.value: 'opening',
@@ -165,6 +152,15 @@ class ScheduleProducers(BuiltinModels):
             },
             status=True,
             name='测试',
+        )
+        self.system = self.model(
+            queue=queues.system,
+            lte_now=True,
+            filters={
+                'status': ScheduleStatus.AUTO.value,
+            },
+            status=True,
+            name='系统',
         )
         try:
             for m in self.model.objects.filter(status=True):
@@ -337,9 +333,9 @@ class Schedules(BuiltinModels):
     model_unique_kwargs = ['task']
     model = ScheduleModel
 
-    def __init__(self, tasks: Tasks, callbacks: ScheduleCallbacks):
-        self.callbacks = callbacks
+    def __init__(self, tasks: Tasks):
         self.log_clean = self.model(
+            status=ScheduleStatus.AUTO,
             task=tasks.log_clean,
             config={
                 "T": {
@@ -356,6 +352,7 @@ class Schedules(BuiltinModels):
 
         self.exception_handle = self.model(
             task=tasks.exception_handle,
+            status=ScheduleStatus.AUTO,
             config={
                 "S": {
                     "period": 60,
@@ -408,7 +405,7 @@ class Schedules(BuiltinModels):
 
         self.strict_schedule_handle = self.model(
             task=tasks.strict_schedule_handle,
-            status=ScheduleStatus.OPENING.value,
+            status=ScheduleStatus.AUTO.value,
             config={
                 "S": {
                     "period": 60 * 60,
@@ -421,11 +418,6 @@ class Schedules(BuiltinModels):
 
         super(Schedules, self).__init__()
 
-    def init_object(self, obj):
-        obj.callback = self.callbacks.log_upload
-        obj = super(Schedules, self).init_object(obj)
-        return obj
-
 
 class Builtins:
 
@@ -433,10 +425,9 @@ class Builtins:
         self._initialized = False
         self.categories = Categories()
         self.schedule_queues = ScheduleQueues()
-        self.schedule_callbacks = ScheduleCallbacks()
         self.schedule_producers = ScheduleProducers(self.schedule_queues)
         self.tasks = Tasks(self.categories, self.schedule_queues)
-        self.schedules = Schedules(self.tasks, self.schedule_callbacks)
+        self.schedules = Schedules(self.tasks)
         self.schedule_queue_permissions = ScheduleQueuePermissions()
 
     @staticmethod
@@ -450,7 +441,7 @@ class Builtins:
     def initialize(self):
         if not self._initialized:
             self._initialized = True
-            if os.environ.get('RUN_MAIN') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
+            if os.environ.get('RUN_MAIN') == 'true' and (os.environ.get('USE_GUNICORN') or 'true') == 'true' and os.environ.get('RUN_CLIENT') != 'true':
                 print('初始化内置任务...')
                 self.init_user()
                 for i in self.__dict__.values():
