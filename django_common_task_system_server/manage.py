@@ -71,6 +71,21 @@ def reload_server():
     start_server()
 
 
+def start_schedule_process():
+    import django
+    django.setup()
+    from django_common_task_system.schedule.backend import ScheduleThread
+    from django_common_task_system.system_task_execution.main import SystemScheduleThread
+    from django_common_task_system.builtins import builtins
+
+    thread = ScheduleThread()
+    thread.start()
+    execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
+    execution_thread.start()
+    thread.join()
+    execution_thread.join()
+
+
 def main():
     """Run administrative tasks."""
     DJANGO_SETTINGS_MODULE = os.environ.get('DJANGO_SETTINGS_MODULE')
@@ -92,8 +107,12 @@ def main():
     parser.add_argument('-u', '--user', type=str)
     parser.add_argument('-p', '--password', type=str)
     args, _ = parser.parse_known_args()
+    start_schedule_process()
+    return 0
     if args.option == 'init':
         init_server(args)
+    elif args.option == 'runschedule':
+        start_schedule_process()
     elif args.option == 'start':
         start_server(args)
     elif args.option == 'stop':
@@ -105,6 +124,4 @@ def main():
 
 
 if __name__ == '__main__':
-    import os
-    print(os.environ['PYTHONPATH'])
     main()

@@ -19,14 +19,11 @@ Schedule: AbstractSchedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
 
-class ScheduleThread(Thread):
+class ScheduleRunner:
     schedule_event = Event()
     last_schedule_time = None
     scheduled_count = 0
     log_file = os.path.join(os.getcwd(), 'logs', 'schedule-thread.log')
-
-    def __init__(self):
-        super().__init__(daemon=True)
 
     @classmethod
     def produce(cls):
@@ -81,3 +78,8 @@ class ScheduleThread(Thread):
             except Exception as e:
                 logger.exception(e)
             time.sleep(SCHEDULE_INTERVAL)
+
+
+class ScheduleThread(ScheduleRunner, Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
