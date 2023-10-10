@@ -38,10 +38,10 @@ ScheduleLog: models.ScheduleLog = get_schedule_log_model()
 ScheduleSerializer = get_schedule_serializer()
 
 
-@receiver(system_initialized_signal, sender='system_initialized')
-def on_system_initialized(sender, **kwargs):
-    schedule_client.start_system_process()
-    schedule_client.start_schedule_thread()
+# @receiver(system_initialized_signal, sender='system_initialized')
+# def on_system_initialized(sender, **kwargs):
+#     schedule_client.start_system_process()
+#     schedule_client.start_schedule_thread()
 
 
 def on_system_shutdown(signum, frame):

@@ -1,5 +1,6 @@
 from django.db.models import TextChoices
 import queue
+import os
 
 
 class TaskStatus(TextChoices):
@@ -42,13 +43,24 @@ class ScheduleCallbackEvent(TextChoices):
     DONE = 'D', '完成'
 
 
+# if os.environ.get('USE_GUNICORN', None) == 'true':
+#     # 当使用gunicorn时，需要使用redis作为队列, 或者其它支持多进程的队列
+#     class ScheduleQueueModule(TextChoices):
+#         FIFO = "django_common_task_system.queue.RedisListQueue", 'Redis先进先出队列'
+#         LIFO = "django_common_task_system.queue.RedisListQueue", 'Redis后进先出队列'
+# else:
 class ScheduleQueueModule(TextChoices):
-    FIFO = "%s.%s" % (queue.Queue.__module__, queue.Queue.__name__), '先进先出'
-    STACK = "%s.%s" % (queue.LifoQueue.__module__, queue.LifoQueue.__name__), '后进先出队列'
-    PRIORITY_QUEUE = "%s.%s" % (queue.PriorityQueue.__module__, queue.PriorityQueue.__name__), '优先级队列'
-    SIMPLE_QUEUE = "%s.%s" % (queue.SimpleQueue.__module__, queue.SimpleQueue.__name__), '简单队列'
-    REDIS_LIST_QUEUE = "django_common_task_system.queue.RedisListQueue", 'Redis List队列'
-    MULTIPROCESS_QUEUE = "multiprocessing.Queue", '多进程队列'
+
+    @staticmethod
+    def get_default():
+        return "django_common_task_system.queue.SocketQueue"
+
+    DEFAULT = get_default(), '先进先出队列'
+    # PRIORITY_QUEUE = "%s.%s" % (queue.PriorityQueue.__module__, queue.PriorityQueue.__name__), '优先级队列'
+    # SIMPLE_QUEUE = "%s.%s" % (queue.SimpleQueue.__module__, queue.SimpleQueue.__name__), '简单队列'
+    REDIS_FIFO = "django_common_task_system.queue.redis.RedisFIFOQueue", 'Redis先进先出队列'
+    REDIS_LIFO = "django_common_task_system.queue.redis.RedisLIFOQueue", 'Redis后进先出队列'
+    # MULTIPROCESS_QUEUE = "multiprocessing.Queue", '多进程队列'
 
 
 class PermissionType(TextChoices):

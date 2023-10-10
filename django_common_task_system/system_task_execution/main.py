@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 from multiprocessing import Process, Value
 
 
@@ -25,3 +26,19 @@ class SystemScheduleProcess(Process):
             target=start_system_client,
             args=(queue, self.success_count, self.failed_count, self.last_process_time, log_file),
             daemon=True)
+
+
+class SystemScheduleThread(threading.Thread):
+    success_count = Value('i', 0)
+    failed_count = Value('i', 0)
+    last_process_time = Value('d', 0)
+
+    def __init__(self, queue, log_file=None):
+        from django_common_task_system.system_task_execution.system_task_execution.executor import start_client
+        from django_common_task_system.utils.logger import add_file_handler
+        add_file_handler(logging.getLogger('client'), log_file=log_file)
+        super(SystemScheduleThread, self).__init__(
+            target=start_client,
+            args=(queue, self.success_count, self.failed_count, self.last_process_time),
+            daemon=True
+        )

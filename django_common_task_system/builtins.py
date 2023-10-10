@@ -94,19 +94,19 @@ class ScheduleQueues(BuiltinModels):
         self.opening = self.model(
             code=self.status_params_mapping[ScheduleStatus.OPENING.value],
             status=True,
-            module=ScheduleQueueModule.FIFO.value,
+            module=ScheduleQueueModule.DEFAULT,
             name='已启用任务',
         )
         self.system = self.model(
             code='system',
             status=True,
-            module=ScheduleQueueModule.MULTIPROCESS_QUEUE.value,
+            module=ScheduleQueueModule.DEFAULT,
             name='系统任务',
         )
         self.test = self.model(
             code=self.status_params_mapping[ScheduleStatus.TEST.value],
             status=True,
-            module=ScheduleQueueModule.FIFO.value,
+            module=ScheduleQueueModule.DEFAULT,
             name='测试任务',
         )
         try:
@@ -120,6 +120,10 @@ class ScheduleQueues(BuiltinModels):
         if instance.status:
             old = self.get(instance.code)
             if not old or old.module != instance.module or old.config != instance.config:
+                # 如果使用的本地Socket队列，则需要检查socket队列服务是否启动，如果没有启动，则启动
+                if instance.module == ScheduleQueueModule.get_default():
+                    from django_common_task_system.queue.socket.server import ensure_server_running
+                    ensure_server_running()
                 instance.queue = import_string(instance.module)(**instance.config)
                 self[instance.code] = instance
                 self.__dict__[instance.code] = instance
