@@ -71,19 +71,28 @@ def reload_server():
     start_server()
 
 
-def start_schedule_process():
+def _start_system_process():
     import django
     django.setup()
     from django_common_task_system.schedule.backend import ScheduleThread
     from django_common_task_system.system_task_execution.main import SystemScheduleThread
     from django_common_task_system.builtins import builtins
 
-    thread = ScheduleThread()
-    thread.start()
+    schedule_thread = ScheduleThread()
+    schedule_thread.start()
     execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
     execution_thread.start()
-    thread.join()
+    schedule_thread.join()
     execution_thread.join()
+
+
+def start_system_process():
+    from multiprocessing import Process, set_start_method
+    set_start_method('spawn')
+    process = Process(target=_start_system_process, daemon=True)
+    process.start()
+    with open('.system_process.pid', 'w') as f:
+        f.write(str(process.pid))
 
 
 def main():
@@ -107,19 +116,18 @@ def main():
     parser.add_argument('-u', '--user', type=str)
     parser.add_argument('-p', '--password', type=str)
     args, _ = parser.parse_known_args()
-    start_schedule_process()
-    return 0
     if args.option == 'init':
         init_server(args)
-    elif args.option == 'runschedule':
-        start_schedule_process()
     elif args.option == 'start':
+        start_system_process()
         start_server(args)
     elif args.option == 'stop':
         stop_server()
     elif args.option == 'reload':
         reload_server()
     else:
+        if sys.argv[1] == 'runserver':
+            start_system_process()
         execute_from_command_line(sys.argv)
 
 

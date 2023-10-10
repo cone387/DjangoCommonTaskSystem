@@ -53,12 +53,15 @@ class BaseRedisQueue:
     def full(self):
         return False
 
-    def validate(self):
+    @classmethod
+    def validate(cls, **kwargs):
         try:
-            self._redis.ping()
+            assert kwargs.pop('name'), 'Missing required param: name'
+            conn = redis.Redis(**kwargs)
+            conn.ping()
             return ""
         except redis.exceptions.ConnectionError:
-            return "%s connection error with config %s" % (self.__class__.__name__, self.config)
+            return "%s connection error with config %s" % (cls.__name__, kwargs)
         except Exception as e:
             return str(e)
 

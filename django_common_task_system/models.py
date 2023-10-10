@@ -150,7 +150,7 @@ class ScheduleQueue(models.Model):
     code = models.CharField(max_length=100, verbose_name='队列编码', unique=True, validators=[code_validator])
     status = models.BooleanField(default=True, verbose_name='状态')
     module = models.CharField(max_length=100, verbose_name='队列类型',
-                              default=ScheduleQueueModule.FIFO,
+                              default=ScheduleQueueModule.DEFAULT,
                               choices=ScheduleQueueModule.choices)
     config = models.JSONField(default=dict, verbose_name='配置', null=True, blank=True)
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')

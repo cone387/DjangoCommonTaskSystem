@@ -3,6 +3,7 @@ import re
 import pickle
 import json
 import inspect
+from collections import OrderedDict
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from typing import Union, Dict, Callable, Coroutine, Optional
@@ -85,41 +86,38 @@ class Queue:
 
 """
 协议格式
-COMMAND Optional[QUEUE_NAME] QUEUE/1.0\r\n
+COMMAND\r\n
 ARGS\r\n
 \r\n\r\n
 
-"""
-
-"""
-command
-list
-lpop
-blpop
-rpop
-brpop
-lpush
-rpush
-LINDEX key index
 """
 
 
 _queue_header_pattern = re.compile(r'(?P<command>\w+) ((?P<queue_name>[\w:/\.]+) )?QUEUE/1.0\r\n')
 _http_header_pattern = re.compile(r'(?P<command>\w+) (?P<url>\S+) HTTP/1.1\r\n')
 _queue_mapping: Dict[str, Queue] = {}
+_cache_mapping: Dict[str, str] = {}
+
 
 Command = Callable[[Optional[str], Optional[asyncio.Queue], ...], Union[Response, HttpResponse, Coroutine]]
 
 
-def get_or_create_queue(name) -> asyncio.Queue:
-    queue = _queue_mapping.get(name)
+def get_or_create_queue(qname) -> asyncio.Queue:
+    queue = _queue_mapping.get(qname)
     if queue is None:
-        queue = Queue(asyncio.Queue(), name)
-        _queue_mapping[name] = queue
+        queue = Queue(asyncio.Queue(), qname)
+        _queue_mapping[qname] = queue
     return queue.queue
 
 
-def list_queues(queue_name: Optional[str], queue: Optional[asyncio.Queue]):
+def get_queue(qname) -> Union[asyncio.Queue, None]:
+    queue = _queue_mapping.get(qname)
+    if queue is None:
+        return None
+    return queue.queue
+
+
+def list_queues():
     return [{
         'name': x.name,
         'create_time': x.create_time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -127,7 +125,8 @@ def list_queues(queue_name: Optional[str], queue: Optional[asyncio.Queue]):
     } for x in _queue_mapping.values()]
 
 
-def pop_queue(queue_name, queue: Optional[asyncio.Queue]):
+def pop_queue(qname):
+    queue = get_queue(qname)
     if queue is None:
         return None
     try:
@@ -136,8 +135,10 @@ def pop_queue(queue_name, queue: Optional[asyncio.Queue]):
         return None
 
 
-async def bpop_queue(queue_name, queue: Optional[asyncio.Queue], timeout: int = 0):
-    queue = get_or_create_queue(queue_name)
+async def bpop_queue(qname, timeout: int = 0):
+    queue = get_or_create_queue(qname)
+    if isinstance(timeout, str):
+        print()
     if timeout <= 0:
         return await queue.get()
     try:
@@ -146,26 +147,36 @@ async def bpop_queue(queue_name, queue: Optional[asyncio.Queue], timeout: int = 
         return None
 
 
-def push_queue(queue_name, queue: Optional[asyncio.Queue], *values):
+def push_queue(qname, *values):
     if not values:
         raise Exception("message is empty")
-    queue = get_or_create_queue(queue_name)
+    queue = get_or_create_queue(qname)
     for value in values:
         queue.put_nowait(value)
     return len(values)
 
 
-def delete_queue(queue_name, queue: Optional[asyncio.Queue]):
-    if queue is None:
-        return 0
-    del _queue_mapping[queue_name]
-    return 1
+def delete_queue(qname):
+    if qname in _queue_mapping:
+        del _queue_mapping[qname]
+        return 1
+    return 0
 
 
-def llen(queue_name, queue: Optional[asyncio.Queue]):
+def llen(qname):
+    queue = get_queue(qname)
     if queue is None:
         return 0
     return queue.qsize()
+
+
+def set_cache(key: str, value: str):
+    _cache_mapping[key] = value
+    return 1
+
+
+def get_cache(key: str):
+    return _cache_mapping.get(key)
 
 
 _available_commands = {
@@ -179,7 +190,7 @@ _available_commands = {
 }
 
 
-async def handle_http_request(header, message) -> BaseResponse:
+async def handle_http_request(header: str, message) -> BaseResponse:
     """
     :param header: GET /hello.txt HTTP/1.1
     :param message:
@@ -221,40 +232,33 @@ async def handle_http_request(header, message) -> BaseResponse:
     return HttpResponse(ret)
 
 
-async def handle_queue_request(header, message: bytes) -> BaseResponse:
-    result = _queue_header_pattern.search(header)
-    if result is None:
-        raise Exception("invalid queue header")
-    command_name, _, queue_name = result.groups()
+async def handle_queue_request(header: str, message: bytes) -> BaseResponse:
+    command_name = header.strip()
     command: Command = _available_commands.get(command_name)
     if command is None:
         raise Exception("invalid command name %s" % command_name)
-    queue = getattr(_queue_mapping.get(queue_name), 'queue', None)
-    line_args = message.strip(b'\r\n\r\n').decode()
-    spec = inspect.getfullargspec(command)
-    # check queue and queue_name
-    annotation = spec.annotations.get('queue_name')
-    if queue_name is None and not (annotation is not None and annotation._name == 'Optional'):
-        raise Exception("queue_name is required")
-    annotation = spec.annotations.get('queue')
-    if queue is None and not (annotation is not None and annotation._name == 'Optional'):
-        raise Exception("queue %s not found" % queue_name)
+    message = message.strip(b'\r\n\r\n').decode()
+    if message:
+        lines = message.split('\r\n')
+    else:
+        lines = []
     args = []
-    if line_args:
-        line_args = line_args.split('\r\n')
-        spec = inspect.getfullargspec(command)
-        if spec.varargs is None and len(line_args) != len(spec.args) - 2:
-            raise Exception("invalid args length")
-        elif spec.varargs:
-            args = line_args[len(spec.args) - 2:]
-        for k, v in zip(spec.args[2:], line_args):
-            annotation = spec.annotations.get(k)
-            if annotation is not None:
+    required_args = []
+    spec = inspect.getfullargspec(command)
+    for line in lines:
+        line_param = line.split('=')
+        if len(line_param) == 2:
+            key, value = line_param
+            annotation = spec.annotations.get(key)
+            if type(annotation) == type:
                 try:
-                    args.append(annotation(v))
+                    value = annotation(value)
                 except Exception as e:
-                    raise Exception("invalid param %s, expect %s" % (k, spec.annotations[k]))
-    ret = command(queue_name, queue, *args)
+                    raise Exception("invalid param %s, expect %s, %s" % (key, spec.annotations[key], e))
+            required_args.append(value)
+        else:
+            args.append(line)
+    ret = command(*required_args, *args)
     if isinstance(ret, BaseResponse):
         return ret
     elif isinstance(ret, Coroutine):
