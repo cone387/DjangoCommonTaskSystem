@@ -121,9 +121,9 @@ class ScheduleQueues(BuiltinModels):
             old = self.get(instance.code)
             if not old or old.module != instance.module or old.config != instance.config:
                 # 如果使用的本地Socket队列，则需要检查socket队列服务是否启动，如果没有启动，则启动
-                if instance.module == ScheduleQueueModule.get_default():
-                    from django_common_task_system.queue.socket.server import ensure_server_running
-                    ensure_server_running()
+                # if instance.module == ScheduleQueueModule.get_default():
+                #     from django_common_task_system.cache_service import ensure_server_running
+                #     ensure_server_running()
                 instance.queue = import_string(instance.module)(**instance.config)
                 self[instance.code] = instance
                 self.__dict__[instance.code] = instance

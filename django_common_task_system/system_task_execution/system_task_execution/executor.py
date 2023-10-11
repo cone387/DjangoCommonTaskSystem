@@ -5,6 +5,7 @@ from queue import Queue
 from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
+from django_common_task_system.cache_service import cache_agent
 from datetime import datetime
 from multiprocessing import Value
 
@@ -163,19 +164,27 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     module.__loaded__ = True
 
 
-def start_client(queue: Queue, success_count: Value, failed_count: Value, last_process_time: Value):
+def start_client(queue: Queue):
     logger.info('system schedule execution process started')
     load_executors()
+    succeed_count = 0
+    failed_count = 0
+    last_process_time = ''
     while True:
-        schedule = queue.get()
         try:
+            cache_agent.mset(succeed_count=succeed_count, failed_count=failed_count,
+                             last_process_time=last_process_time, scope='execution-thread')
+        except Exception as e:
+            logger.exception(e)
+        try:
+            schedule = queue.get()
             schedule = Schedule(schedule)
             logger.info('get schedule: %s', schedule)
             executor = Executor(schedule)
             executor.start()
-            success_count.value += 1
+            succeed_count += 1
         except Exception as e:
-            failed_count.value += 1
+            failed_count += 1
             logger.exception(e)
             try:
                 ExceptionReport.objects.create(
@@ -185,4 +194,4 @@ def start_client(queue: Queue, success_count: Value, failed_count: Value, last_p
             except Exception as e:
                 logger.exception(e)
         finally:
-            last_process_time.value = datetime.now().timestamp()
+            last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

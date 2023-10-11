@@ -4,6 +4,7 @@ from django_common_task_system.builtins import builtins
 from django_common_task_system import get_schedule_model, get_schedule_serializer
 from django_common_task_system.models import AbstractSchedule
 from django_common_task_system.utils.logger import add_file_handler
+from django_common_task_system.cache_service import cache_agent
 from .config import ScheduleConfig
 from threading import Thread, Event
 from datetime import datetime
@@ -18,15 +19,17 @@ logger = logging.getLogger('schedule-thread')
 Schedule: AbstractSchedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
+scheduled_count = 0
+
 
 class ScheduleRunner:
     schedule_event = Event()
     last_schedule_time = None
-    scheduled_count = 0
+    # scheduled_count = 0
     log_file = os.path.join(os.getcwd(), 'logs', 'schedule-thread.log')
 
-    @classmethod
-    def produce(cls):
+    def produce(self):
+        global scheduled_count
         now = datetime.now()
         qsize = getattr(settings, 'SCHEDULE_QUEUE_MAX_SIZE', 1000)
         max_queue_size = qsize * 2
@@ -60,10 +63,18 @@ class ScheduleRunner:
                     raise e
             put_size = queue.qsize() - before_size
             schedule_result[queue_instance.code] = put_size
-            cls.scheduled_count += put_size
-        cls.last_schedule_time = now
+            print("before schedule count: %s, put size: %s" % (scheduled_count, put_size))
+            # 诡异的是这里的scheduled_count运行几次后还会变成0, 为什么?
+            old = scheduled_count
+            if old > scheduled_count:
+                print("scheduled_count: %s, old: %s" % (scheduled_count, old))
+            scheduled_count = scheduled_count + put_size
+            print("after schedule count: %s, put size: %s" % (scheduled_count, put_size))
+        self.last_schedule_time = now
         for queue_code, put_size in schedule_result.items():
             logger.info('schedule %s schedules to %s' % (put_size, queue_code))
+        cache_agent.mset(last_schedule_time=self.last_schedule_time.strftime('%Y-%m-%d %H:%M:%S'),
+                         scheduled_count=scheduled_count, scope='schedule-thread')
 
     def run(self) -> None:
         add_file_handler(logger, self.log_file)
@@ -77,6 +88,8 @@ class ScheduleRunner:
                 self.produce()
             except Exception as e:
                 logger.exception(e)
+            global scheduled_count
+            print("scheduled_count: %s" % scheduled_count)
             time.sleep(SCHEDULE_INTERVAL)
 
 
