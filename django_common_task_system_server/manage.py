@@ -85,22 +85,40 @@ def _start_system_process():
     # from django_common_task_system.cache_service import ensure_service_available
     # ensure_service_available()
 
-    schedule_thread = ScheduleThread()
-    schedule_thread.start()
-    execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
-    execution_thread.start()
-    cache_agent.set('schedule-thread:pid', schedule_thread.ident)
-    cache_agent.set('execution-thread:pid', execution_thread.ident)
-    cache_agent.set('system-process:pid', os.getpid())
-    schedule_thread.join()
-    execution_thread.join()
+    # 检查是否其它进程已经启动了
+    schedule_thread_pid = cache_agent.get('schedule-thread:pid')
+    if schedule_thread_pid:
+        schedule_thread = None
+        print('schedule thread already started, pid: %s' % schedule_thread_pid)
+    else:
+        schedule_thread = ScheduleThread()
+        schedule_thread.start()
+        cache_agent.set('schedule-thread:pid', schedule_thread.ident)
+
+    execution_thread_pid = cache_agent.get('execution-thread:pid')
+    if execution_thread_pid:
+        execution_thread = None
+        print('execution thread already started, pid: %s' % execution_thread_pid)
+    else:
+        execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
+        execution_thread.start()
+        cache_agent.set('execution-thread:pid', execution_thread.ident)
+
+    if schedule_thread:
+        schedule_thread.join()
+    if execution_thread:
+        execution_thread.join()
+    if schedule_thread or execution_thread:
+        print("system process started, pid: %s" % os.getpid())
+        cache_agent.set('system-process:pid', os.getpid())
 
 
 def start_system_process():
-    from multiprocessing import Process, set_start_method
-    set_start_method('spawn', force=True)
-    process = Process(target=_start_system_process, daemon=True)
-    process.start()
+    if os.environ.get('RUN_MAIN') == 'true':
+        from multiprocessing import Process, set_start_method
+        set_start_method('spawn', force=True)
+        process = Process(target=_start_system_process, daemon=True)
+        process.start()
 
 
 def ensure_cache_service_running():

@@ -5,6 +5,7 @@ import inspect
 import os
 import socket
 import importlib
+import time
 from asyncio import StreamReader, StreamWriter
 from datetime import datetime
 from typing import Union, Dict, Callable, Coroutine, Optional, List
@@ -93,11 +94,29 @@ ARGS\r\n
 """
 
 
+class TTLString(str):
+    """
+    为字符串增加过期时间
+    """
+
+    def __new__(cls, value, expire=0):
+        obj = super(TTLString, cls).__new__(cls, value)
+        obj.expire = expire
+        obj.create_time = time.time()
+        return obj
+
+    @property
+    def expired(self):
+        if self.expire <= 0:
+            return False
+        return time.time() - self.create_time > self.expire
+
+
 _queue_header_pattern = re.compile(r'(?P<command>\w+) ((?P<queue_name>[\w:/\.]+) )?QUEUE/1.0\r\n')
 _http_header_pattern = re.compile(r'(?P<command>\w+) (?P<url>\S+) HTTP/1.1\r\n')
 _http_path_pattern = re.compile(r'/(?P<path>\w+)?\??(?P<query>.*)')
 _queue_mapping: Dict[str, Queue] = {}
-_cache_mapping: Dict[str, str] = {}
+_cache_mapping: Dict[str, TTLString] = {}
 
 
 Command = Callable[[Optional[str], Optional[asyncio.Queue], ...], Union[Response, HttpResponse, Coroutine]]
@@ -125,7 +144,15 @@ def _list():
             'create_time': x.create_time.strftime('%Y-%m-%d %H:%M:%S'),
             'size': x.queue.qsize()
         } for x in _queue_mapping.values()],
-        'cache': _cache_mapping
+        'cache': [
+            {
+                'key': k,
+                'value': v,
+                'expire': v.expire,
+                'create_time': datetime.fromtimestamp(v.create_time).strftime('%Y-%m-%d %H:%M:%S')
+            }
+            for k, v in _cache_mapping.items()
+        ]
     }
 
 
@@ -172,8 +199,8 @@ def _llen(qname):
     return queue.qsize()
 
 
-def _set(key: str, value: str):
-    _cache_mapping[key] = value
+def _set(key: str, value: str, expire: int = 0):
+    _cache_mapping[key] = TTLString(value, expire=expire)
     return 1
 
 
@@ -181,12 +208,12 @@ def _get(key: str):
     return _cache_mapping.get(key)
 
 
-def _mset(*args):
+def _mset(*args, expire: int = 0):
     for arg in args:
         if '=' not in arg:
             raise Exception("invalid param %s, expect key=value" % arg)
         k, v = arg.split('=', 1)
-        _cache_mapping[k] = v
+        _cache_mapping[k] = TTLString(v, expire=expire)
     return len(args)
 
 
@@ -304,6 +331,15 @@ async def handle_client(reader: StreamReader, writer: StreamWriter):
         #     writer.close()
 
 
+async def run_cache_manager():
+    # 每隔n秒检查一次缓存, 如果缓存过期则删除
+    while True:
+        await asyncio.sleep(1)
+        for k, v in _cache_mapping.items():
+            if v.expired:
+                del _cache_mapping[k]
+
+
 async def main():
     import socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -312,12 +348,12 @@ async def main():
     server = await asyncio.start_server(handle_client, sock=server_socket)
     addr = server_socket.getsockname()
     print(f'Cacheing Serving on {addr}')
-
+    await run_cache_manager()
     async with server:
         await server.serve_forever()
 
 
-def start_queue_server():
+def start_cache_service():
     asyncio.run(main())
 
 
@@ -327,7 +363,7 @@ def ensure_server_running():
     except ConnectionRefusedError:
         from multiprocessing import Process, set_start_method
         set_start_method('spawn', force=True)
-        p = Process(target=start_queue_server, daemon=True)
+        p = Process(target=start_cache_service, daemon=True)
         p.start()
 
 
@@ -372,21 +408,24 @@ class CacheAgent:
         data = data.strip(b'\r\n').decode()
         if data[0] == '-':
             raise Exception(data[1:])
+        elif data == '*-1':
+            return None
+        elif data[0] == '+':
+            return data[1:]
         return data
 
     def llen(self, key):
         return int(self.execute('llen', qname=key))
 
-    def set(self, key, value):
-        return self.execute('set', key, value)
+    def set(self, key, value, expire=0):
+        return self.execute('set', key, value, expire=expire)
 
-    def mset(self, scope=None, **kwargs):
-        # DjangoCommonTaskSystemCache
+    def mset(self, scope=None, expire=0, **kwargs):
         if scope:
             args = [f"{scope}:{k}={v}" for k, v in kwargs.items()]
         else:
             args = [f"{k}={v}" for k, v in kwargs.items()]
-        return self.execute('mset', *args)
+        return self.execute('mset', *args, expire=expire)
 
     def get(self, key):
         return self.execute('get', key)
@@ -398,16 +437,10 @@ class CacheAgent:
         return self.execute('push', *value, qname=key)
 
     def pop(self, key):
-        item = self.execute('pop', qname=key)
-        if item == '*-1':
-            return None
-        return item[1:]
+        return self.execute('pop', qname=key)
 
     def bpop(self, key, timeout=0):
-        item = self.execute('bpop', qname=key, timeout=timeout)
-        if item == '*-1':
-            return None
-        return item[1:]
+        return self.execute('bpop', qname=key, timeout=timeout)
 
     def list(self):
         return self.execute('list')
@@ -440,4 +473,4 @@ else:
 
 
 if __name__ == '__main__':
-    start_queue_server()
+    start_cache_service()

@@ -19,17 +19,19 @@ logger = logging.getLogger('schedule-thread')
 Schedule: AbstractSchedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
-scheduled_count = 0
-
 
 class ScheduleRunner:
     schedule_event = Event()
     last_schedule_time = None
-    # scheduled_count = 0
+    scheduled_count = 0
     log_file = os.path.join(os.getcwd(), 'logs', 'schedule-thread.log')
 
+    @property
+    def runner_id(self) -> int:
+        raise NotImplementedError
+
     def produce(self):
-        global scheduled_count
+        count = 0
         now = datetime.now()
         qsize = getattr(settings, 'SCHEDULE_QUEUE_MAX_SIZE', 1000)
         max_queue_size = qsize * 2
@@ -63,18 +65,17 @@ class ScheduleRunner:
                     raise e
             put_size = queue.qsize() - before_size
             schedule_result[queue_instance.code] = put_size
-            print("before schedule count: %s, put size: %s" % (scheduled_count, put_size))
             # 诡异的是这里的scheduled_count运行几次后还会变成0, 为什么?
-            old = scheduled_count
-            if old > scheduled_count:
-                print("scheduled_count: %s, old: %s" % (scheduled_count, old))
-            scheduled_count = scheduled_count + put_size
-            print("after schedule count: %s, put size: %s" % (scheduled_count, put_size))
+            count += put_size
         self.last_schedule_time = now
         for queue_code, put_size in schedule_result.items():
             logger.info('schedule %s schedules to %s' % (put_size, queue_code))
+        self.scheduled_count += count
+        # 设置schedule-thread:pid的过期时间为5秒, 5秒后如果没有更新, 则认为该进程已经停止, 此set相当于心跳包
+        cache_agent.set('schedule-thread:pid', self.runner_id, expire=5)
+        # 设置schedule-thread的状态, 用于监控, 不用以下设置为心跳, 是因为想保留上次的状态
         cache_agent.mset(last_schedule_time=self.last_schedule_time.strftime('%Y-%m-%d %H:%M:%S'),
-                         scheduled_count=scheduled_count, scope='schedule-thread')
+                         scheduled_count=self.scheduled_count, scope='schedule-thread')
 
     def run(self) -> None:
         add_file_handler(logger, self.log_file)
@@ -88,11 +89,14 @@ class ScheduleRunner:
                 self.produce()
             except Exception as e:
                 logger.exception(e)
-            global scheduled_count
-            print("scheduled_count: %s" % scheduled_count)
+            print("scheduled_count: %s" % self.scheduled_count)
             time.sleep(SCHEDULE_INTERVAL)
 
 
 class ScheduleThread(ScheduleRunner, Thread):
     def __init__(self):
         super().__init__(daemon=True)
+
+    @property
+    def runner_id(self) -> int:
+        return self.ident
