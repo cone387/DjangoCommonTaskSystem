@@ -1,17 +1,19 @@
+import os
 import traceback
 import socket
 import logging
 from queue import Queue
+from typing import Callable
 from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
 from django_common_task_system.cache_service import cache_agent
+from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
-from multiprocessing import Value
 
 
 IP = socket.gethostbyname(socket.gethostname())
-logger = logging.getLogger('client')
+logger = logging.getLogger('consume')
 ScheduleLog = get_schedule_log_model()
 
 
@@ -164,34 +166,96 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     module.__loaded__ = True
 
 
-def start_client(queue: Queue):
-    logger.info('system schedule execution process started')
-    load_executors()
-    succeed_count = 0
-    failed_count = 0
-    last_process_time = ''
-    while True:
+class State:
+    def __init__(self, key):
+        self.key = key
+        self.ident = None
+        self.succeed_count = 0
+        self.failed_count = 0
+        self.last_process_time = ''
+        self.is_running = False
+
+    def update(self):
         try:
-            cache_agent.mset(succeed_count=succeed_count, failed_count=failed_count,
-                             last_process_time=last_process_time, scope='execution-thread')
+            cache_agent.hset(self.key,
+                             ident=self.ident,
+                             succeed_count=self.succeed_count,
+                             failed_count=self.failed_count,
+                             last_process_time=self.last_process_time,
+                             is_running=self.is_running)
         except Exception as e:
             logger.exception(e)
+
+    def refresh(self):
         try:
-            schedule = queue.get()
-            schedule = Schedule(schedule)
-            logger.info('get schedule: %s', schedule)
-            executor = Executor(schedule)
-            executor.start()
-            succeed_count += 1
+            state = cache_agent.hgetall('execution-thread')
+            self.ident = state['ident']
+            self.succeed_count = state['succeed_count']
+            self.failed_count = state['failed_count']
+            self.last_process_time = state['last_process_time']
         except Exception as e:
-            failed_count += 1
             logger.exception(e)
+
+
+class Consumer:
+    started = False
+    key = 'consumer'
+    log_file = add_file_handler(logger)
+    state = State(key)
+
+    def __init__(self, queue: Queue):
+        self.queue = queue
+
+    @property
+    def id(self):
+        return os.getpid()
+
+    @property
+    def is_running(self):
+        return self.state.is_running
+
+    def run(self):
+        queue = self.queue
+        state = self.state
+        load_executors()
+        logger.info('system schedule execution process started')
+        while True:
+            state.update()
             try:
-                ExceptionReport.objects.create(
-                    ip=IP,
-                    content=traceback.format_exc(),
-                )
+                schedule = queue.get()
+                schedule = Schedule(schedule)
+                logger.info('get schedule: %s', schedule)
+                executor = Executor(schedule)
+                executor.start()
+                state.succeed_count += 1
             except Exception as e:
+                state.failed_count += 1
                 logger.exception(e)
-        finally:
-            last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                try:
+                    ExceptionReport.objects.create(
+                        ip=IP,
+                        content=traceback.format_exc(),
+                    )
+                except Exception as e:
+                    logger.exception(e)
+            finally:
+                state.last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    def start_if_not_started(self):
+        start: Callable[[], None] = getattr(self, 'start', None)
+        assert start, 'runner must have start method'
+        if self.state.is_running:
+            error = 'execution thread already started, pid: %s' % self.state.ident
+            logger.info(error)
+        else:
+            start()
+            cache_agent.hset(self.key, ident=self.id, log_file=self.log_file,
+                             runner=self.__class__.__name__, is_running=True)
+            logger.info('execution thread started, pid: %s' % self.id)
+            error = ''
+        return error
+
+
+def consume(queue):
+    consumer = Consumer(queue)
+    consumer.run()

@@ -21,7 +21,8 @@ class SocketQueue:
 
     def get(self, block=True, timeout=0):
         if block:
-            return self.agent.bpop(self.name, timeout=timeout)
+            item = self.agent.bpop(self.name, timeout=timeout)
+            return json.loads(item)
         return self.get_nowait()
 
     def get_nowait(self):

@@ -1,14 +1,15 @@
 from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
 from django_common_task_system.choices import TaskClientStatus, ClientEngineType
-from django_common_task_system.schedule.backend import ScheduleThread
+from django_common_task_system.schedule import backend as scheduler
 from django_common_task_system.models import TaskClient, DockerEngine
 from docker.errors import APIError
 from django.conf import settings
 from typing import Union
 from threading import Lock, Timer, Thread
 from docker.models.containers import Container
-from django_common_task_system.system_task_execution.main import SystemScheduleProcess
+from django_common_task_system.system_task_execution import thread as consume_thread
+from django_common_task_system.system_task_execution.thread import ScheduleConsumerThread, consume_thread
 import os
 import traceback
 import subprocess
@@ -23,8 +24,7 @@ SYS_ENCODING = locale.getpreferredencoding()
 _current_process: Union[Process, None] = None
 _current_process_lock = Lock()
 
-_schedule_thread: Union[ScheduleThread, None] = None
-_schedule_thread_lock = Lock()
+_schedule_lock = Lock()
 
 
 def current_process():
@@ -181,7 +181,7 @@ def start_client(client: TaskClient):
     thread.start()
 
 
-def start_system_process() -> str:
+def start_consume() -> str:
     global _current_process, _current_process_lock
     error = ''
     if _current_process is not None:
@@ -193,9 +193,7 @@ def start_system_process() -> str:
             from django_common_task_system.builtins import builtins
             set_start_method('spawn', True)
             try:
-                _current_process = SystemScheduleProcess(
-                    builtins.schedule_queues.system.queue,
-                    log_file=getattr(settings, 'SYSTEM_PROCESS_LOG_FILE'))
+                _current_process = ScheduleConsumerThread()
                 _current_process.start()
             except Exception as e:
                 error = str(e)
@@ -204,7 +202,7 @@ def start_system_process() -> str:
     return error
 
 
-def stop_system_process():
+def stop_consume():
     global _current_process
     error = ''
     if _current_process is None:
@@ -231,10 +229,10 @@ def stop_system_process():
     return error
 
 
-def restart_system_process():
-    error = stop_system_process()
+def restart_consume():
+    error = start_consume()
     if not error:
-        error = start_system_process()
+        error = start_consume()
     return error
 
 
@@ -282,61 +280,43 @@ class PagedLog:
         return log
 
 
-def read_system_process_log(page_size=10 * 1024) -> Union[PagedLog, None]:
+def read_consume_log(page_size=10 * 1024) -> Union[PagedLog, None]:
     log_file = getattr(settings, 'SYSTEM_PROCESS_LOG_FILE', None)
     if not os.path.isfile(log_file):
         return None
     return PagedLog(log_file, page_size)
 
 
-def current_schedule_thread():
-    return _schedule_thread
+# def start_schedule():
+#     return scheduler.schedule_thread.start_if_not_started()
+#
+#
+# def listen_schedule_thread():
+#     if scheduler.schedule_thread.is_alive():
+#         Timer(1, listen_schedule_thread).start()
+#     else:
+#         scheduler.schedule_thread.state.is_running = False
+#         _schedule_lock.release()
+#
+#
+# def stop_schedule() -> str:
+#     if not scheduler.schedule_thread.is_running:
+#         error = 'schedule thread not started'
+#     else:
+#         if not _schedule_lock.acquire(blocking=False):
+#             error = 'another action to thread is processing'
+#         else:
+#             if scheduler.schedule_thread.schedule_event.is_set():
+#                 scheduler.schedule_thread.schedule_event.clear()
+#             listen_schedule_thread()
+#             if scheduler.schedule_thread.is_alive():
+#                 error = 'schedule thread is stopping'
+#             else:
+#                 error = ''
+#     return error
 
 
-def start_schedule_thread():
-    global _schedule_thread
-    if _schedule_thread is not None:
-        error = "another schedule thread is running"
-    else:
-        if _schedule_thread_lock.acquire(blocking=False):
-            _schedule_thread = ScheduleThread()
-            _schedule_thread.start()
-            _schedule_thread_lock.release()
-            error = ''
-        else:
-            error = 'another action to thread is processing'
-    return error
-
-
-def listen_schedule_thread():
-    global _schedule_thread
-    if _schedule_thread is not None:
-        if _schedule_thread.is_alive():
-            Timer(1, listen_schedule_thread).start()
-        else:
-            _schedule_thread_lock.release()
-            _schedule_thread = None
-
-
-def stop_schedule_thread() -> str:
-    global _schedule_thread
-    if _schedule_thread is None:
-        error = 'schedule thread not started'
-    else:
-        if not _schedule_thread_lock.acquire(blocking=False):
-            error = 'another action to thread is processing'
-        else:
-            if _schedule_thread.schedule_event.is_set():
-                _schedule_thread.schedule_event.clear()
-            listen_schedule_thread()
-            if _schedule_thread.is_alive():
-                error = 'schedule thread is stopping'
-            else:
-                error = ''
-    return error
-
-
-def read_schedule_thread_log(page_size=10 * 1024) -> Union[PagedLog, None]:
-    if not os.path.isfile(ScheduleThread.log_file):
+def read_schedule_log(page_size=10 * 1024) -> Union[PagedLog, None]:
+    if not os.path.isfile(scheduler.schedule_thread.log_file):
         return None
-    return PagedLog(ScheduleThread.log_file, page_size)
+    return PagedLog(scheduler.schedule_thread.log_file, page_size)

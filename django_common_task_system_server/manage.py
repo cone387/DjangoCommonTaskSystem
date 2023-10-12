@@ -75,10 +75,8 @@ def _start_system_process():
     import django
     import os
     django.setup()
-    from django_common_task_system.schedule.backend import ScheduleThread
-    from django_common_task_system.system_task_execution.main import SystemScheduleThread
-    from django_common_task_system.builtins import builtins
-    from django_common_task_system.cache_service import cache_agent
+    from django_common_task_system.schedule.backend import schedule_thread
+    from django_common_task_system.system_task_execution.thread import consume_thread
 
     # 因为该进程是由Process(daemon=True), 所以不能在该进程中再启动子进程，需要放在外面启动
     # AssertionError: daemonic processes are not allowed to have children
@@ -86,31 +84,17 @@ def _start_system_process():
     # ensure_service_available()
 
     # 检查是否其它进程已经启动了
-    schedule_thread_pid = cache_agent.get('schedule-thread:pid')
-    if schedule_thread_pid:
-        schedule_thread = None
-        print('schedule thread already started, pid: %s' % schedule_thread_pid)
-    else:
-        schedule_thread = ScheduleThread()
-        schedule_thread.start()
-        cache_agent.set('schedule-thread:pid', schedule_thread.ident)
+    schedule_thread.start_if_not_started()
+    consume_thread.start_if_not_started()
 
-    execution_thread_pid = cache_agent.get('execution-thread:pid')
-    if execution_thread_pid:
-        execution_thread = None
-        print('execution thread already started, pid: %s' % execution_thread_pid)
-    else:
-        execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
-        execution_thread.start()
-        cache_agent.set('execution-thread:pid', execution_thread.ident)
-
-    if schedule_thread:
-        schedule_thread.join()
-    if execution_thread:
-        execution_thread.join()
-    if schedule_thread or execution_thread:
+    if schedule_thread.started or consume_thread.started:
         print("system process started, pid: %s" % os.getpid())
-        cache_agent.set('system-process:pid', os.getpid())
+        if schedule_thread.started:
+            schedule_thread.join()
+        if consume_thread is not None:
+            consume_thread.join()
+    else:
+        print("system process started already, ignored")
 
 
 def start_system_process():

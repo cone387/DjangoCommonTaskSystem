@@ -116,7 +116,7 @@ _queue_header_pattern = re.compile(r'(?P<command>\w+) ((?P<queue_name>[\w:/\.]+)
 _http_header_pattern = re.compile(r'(?P<command>\w+) (?P<url>\S+) HTTP/1.1\r\n')
 _http_path_pattern = re.compile(r'/(?P<path>\w+)?\??(?P<query>.*)')
 _queue_mapping: Dict[str, Queue] = {}
-_cache_mapping: Dict[str, TTLString] = {}
+_cache_mapping: Dict[str, Union[TTLString, Dict]] = {}
 
 
 Command = Callable[[Optional[str], Optional[asyncio.Queue], ...], Union[Response, HttpResponse, Coroutine]]
@@ -138,21 +138,22 @@ def get_queue(qname) -> Union[asyncio.Queue, None]:
 
 
 def _list():
+    cache = {
+        k: {
+            'value': v,
+            'expire': v.expire,
+            'create_time': datetime.fromtimestamp(v.create_time).strftime('%Y-%m-%d %H:%M:%S')
+        }
+        if isinstance(v, TTLString) else v
+        for k, v in _cache_mapping.items()
+    }
     return {
         'queues': [{
             'name': x.name,
             'create_time': x.create_time.strftime('%Y-%m-%d %H:%M:%S'),
             'size': x.queue.qsize()
         } for x in _queue_mapping.values()],
-        'cache': [
-            {
-                'key': k,
-                'value': v,
-                'expire': v.expire,
-                'create_time': datetime.fromtimestamp(v.create_time).strftime('%Y-%m-%d %H:%M:%S')
-            }
-            for k, v in _cache_mapping.items()
-        ]
+        **cache
     }
 
 
@@ -176,7 +177,7 @@ async def _bpop(qname, timeout: int = 0):
         return None
 
 
-def _push(qname, *values):
+def _push(*values, qname=None):
     if not values:
         raise Exception("message is empty")
     queue = get_or_create_queue(qname)
@@ -208,13 +209,39 @@ def _get(key: str):
     return _cache_mapping.get(key)
 
 
-def _mset(*args, expire: int = 0):
-    for arg in args:
-        if '=' not in arg:
-            raise Exception("invalid param %s, expect key=value" % arg)
-        k, v = arg.split('=', 1)
+def _mset(data: str, expire: int = 0):
+    mapping = json.loads(data)
+    for k, v in mapping.items():
+        # if '=' not in arg:
+        #     raise Exception("invalid param %s, expect key=value" % arg)
+        # k, v = arg.split('=', 1)
         _cache_mapping[k] = TTLString(v, expire=expire)
-    return len(args)
+    return len(mapping)
+
+
+def _hset(name, data: str):
+    mapping = json.loads(data)
+    hmap = _cache_mapping.setdefault(name, dict())
+    hmap.update(mapping)
+    return len(mapping)
+
+
+def _hget(name, key):
+    hmap = _cache_mapping.get(name)
+    if hmap is None:
+        return None
+    if not isinstance(hmap, dict):
+        raise Exception("key %s is not a map, use get instead" % name)
+    return hmap.get(key)
+
+
+def _hgetall(name: str) -> Union[Dict, None]:
+    item = _cache_mapping.get(name)
+    if item is None:
+        return None
+    if not isinstance(item, dict):
+        raise Exception("key %s is not a map, use get instead" % name)
+    return item
 
 
 _available_commands = {
@@ -227,19 +254,22 @@ _available_commands = {
     'set': _set,
     'get': _get,
     'mset': _mset,
+    'hset': _hset,
+    'hget': _hget,
+    'hgetall': _hgetall,
     # 'LINDEX': lambda: HttpResponse(''),
 }
 
 
-def parse_command_args(command: Command, params_str: str, sep='&'):
+def parse_command_args(command: Command, params_str: str, sep='&') -> (List[str], Dict[str, str]):
     split_params = params_str.split(sep) if params_str else []
     spec = inspect.getfullargspec(command)
-    defined_args = []
-    varargs = []
+    args = []
+    kwargs = {}
     for param_str in split_params:
         if param_str[0] == '$':
             # socket queue协议, $开头的参数是变长参数
-            varargs.append(param_str[1:])
+            args.append(param_str[1:])
         else:
             split_param = param_str.split('=', 1)
             if len(split_param) == 2:
@@ -250,8 +280,8 @@ def parse_command_args(command: Command, params_str: str, sep='&'):
                         value = annotation(value)
                     except Exception as e:
                         raise Exception("invalid param %s, expect %s, %s" % (key, spec.annotations[key], e))
-                defined_args.append(value)
-    return defined_args, varargs
+                kwargs[key] = value
+    return args, kwargs
 
 
 async def handle_http_request(header: str, message) -> BaseResponse:
@@ -268,8 +298,8 @@ async def handle_http_request(header: str, message) -> BaseResponse:
     command: Command = _available_commands.get(command_name)
     if command is None:
         raise Exception("invalid command name %s" % command_name)
-    defined_args, varargs = parse_command_args(command, http_path_match.group('query'), sep='&')
-    ret = command(*defined_args, *varargs)
+    args, kwargs = parse_command_args(command, http_path_match.group('query'), sep='&')
+    ret = command(*args, **kwargs)
     if isinstance(ret, BaseResponse):
         return ret
     elif isinstance(ret, Coroutine):
@@ -283,8 +313,8 @@ async def handle_queue_request(header: str, message: bytes) -> BaseResponse:
     if command is None:
         raise Exception("invalid command name %s" % command_name)
     message = message.strip(b'\r\n\r\n').decode()
-    defined_args, varargs = parse_command_args(command, message, sep='\r\n')
-    ret = command(*defined_args, *varargs)
+    args, kwargs = parse_command_args(command, message, sep='\r\n')
+    ret = command(*args, **kwargs)
     if isinstance(ret, BaseResponse):
         return ret
     elif isinstance(ret, Coroutine):
@@ -335,9 +365,13 @@ async def run_cache_manager():
     # 每隔n秒检查一次缓存, 如果缓存过期则删除
     while True:
         await asyncio.sleep(1)
+        expired_keys = []
         for k, v in _cache_mapping.items():
-            if v.expired:
-                del _cache_mapping[k]
+            if isinstance(v, TTLString) and v.expired:
+                expired_keys.append(k)
+            # 不能用del, 因为在遍历的时候不能删除
+        for k in expired_keys:
+            del _cache_mapping[k]
 
 
 async def main():
@@ -398,8 +432,14 @@ class CacheAgent:
     def execute(self, command, *args: List[str], **kwargs):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         _socket.connect((self.host, self.port))
-        commands = [command, *[f"{k}={v}" for k, v in kwargs.items()], *[f'${x}' for x in args]]
-        message = f'\r\n'.join(commands) + '\r\n\r\n'
+        command_lines = [command]
+        for k, v in kwargs.items():
+            if isinstance(v, dict):
+                v = json.dumps(v, ensure_ascii=False)
+            command_lines.append(f"{k}={v}")
+        for arg in args:
+            command_lines.append(f'${arg}')
+        message = f'\r\n'.join(command_lines) + '\r\n\r\n'
         _socket.send(message.encode())
         data = _socket.recv(4096)
         while not data.endswith(b'\r\n\r\n'):
@@ -422,10 +462,8 @@ class CacheAgent:
 
     def mset(self, scope=None, expire=0, **kwargs):
         if scope:
-            args = [f"{scope}:{k}={v}" for k, v in kwargs.items()]
-        else:
-            args = [f"{k}={v}" for k, v in kwargs.items()]
-        return self.execute('mset', *args, expire=expire)
+            kwargs = {f'{scope}:{k}': v for k, v in kwargs.items()}
+        return self.execute('mset', expire=expire, data=kwargs)
 
     def get(self, key):
         return self.execute('get', key)
@@ -444,6 +482,23 @@ class CacheAgent:
 
     def list(self):
         return self.execute('list')
+
+    def hset(self, name, key: Optional[str] = None,
+             value: Optional[str] = None, mapping: Optional[Dict[str, str]] = None, **kwargs):
+        data = mapping or {}
+        data.update(kwargs)
+        if key and value:
+            data[key] = value
+        return self.execute('hset', name, data=data)
+
+    def hget(self, name, key):
+        return self.execute('hget', name, key)
+
+    def hgetall(self, name):
+        item = self.execute('hgetall', name)
+        if item is not None:
+            item = json.loads(item)
+        return item
 
     def ping(self):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
