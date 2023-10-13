@@ -22,6 +22,7 @@ from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
 from django_common_task_system.schedule.scheduler import scheduler_agent
 from django_common_task_system.system_task_execution import consumer_agent
+from django_common_task_system.program import ProgramAction, ProgramAgent
 from .choices import TaskClientStatus, ScheduleStatus
 from .models import TaskClient
 from .builtins import builtins
@@ -313,21 +314,9 @@ class ScheduleTimeParseView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-from enum import Enum
+class ClientView(APIView):
 
-
-class Action(str, Enum):
-    START = 'start'
-    STOP = 'stop'
-    RESTART = 'restart'
-    LOG = 'log'
-
-
-class ClientView:
-
-    @staticmethod
-    @api_view(['GET'])
-    def action(request: Request, action: str):
+    def get(self, request: Request, action: str):
         if action == 'start':
             client = TaskClient.objects.create()
             return Response({'client_id': client.id})
@@ -403,42 +392,32 @@ def log_view(request: Request, filename):
     return Response({'error': f'invalid page({page}) or page_size({page_size})'}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class SchedulerView(APIView):
+class ProgramViewMixin:
+    agent: ProgramAgent = None
 
     def get(self, request: Request, action: str):
-        scheduler_agent.state.pull()
-        if action == Action.START:
-            error = scheduler_agent.start()
-        elif action == 'stop':
-            error = scheduler_agent.stop()
-        elif action == 'restart':
-            error = scheduler_agent.restart()
-        elif action == 'log':
-            return log_view(request, scheduler_agent.state.log_file)
+        agent = self.agent
+        agent.state.pull()
+        if action == ProgramAction.START:
+            error = agent.start()
+        elif action == ProgramAction.STOP:
+            error = agent.stop()
+        elif action == ProgramAction.RESTART:
+            error = agent.restart()
+        elif action == ProgramAction.LOG:
+            return log_view(request, agent.state.log_file)
         else:
             error = 'invalid action: %s, only support start/stop/restart/log' % action
-        if error:
-            return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"message": "OK", "action": action, "state": scheduler_agent.state.json()})
+        return Response({"message": error or "OK", "action": action, "state": agent.state},
+                        status=status.HTTP_400_BAD_REQUEST if error else status.HTTP_200_OK)
 
 
-class ConsumerView(APIView):
-    def get(self, request: Request, action: str):
-        consumer_agent.state.pull()
-        if action == Action.START:
-            error = consumer_agent.start()
-        elif action == 'stop':
-            error = consumer_agent.stop()
-        elif action == 'restart':
-            error = consumer_agent.restart()
-        elif action == 'log':
-            return log_view(request, consumer_agent.state.log_file)
-        else:
-            return Response({'error': 'invalid action: %s, only support start/stop/restart/log' % action},
-                            status=status.HTTP_400_BAD_REQUEST)
-        if error:
-            return Response(error, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"msg": f"操作({action})成功", "state": consumer_agent.state.json()})
+class SchedulerView(ProgramViewMixin, APIView):
+    agent = scheduler_agent
+
+
+class ConsumerView(ProgramViewMixin, APIView):
+    agent = consumer_agent
 
 
 class TaskListView(UserListAPIView):

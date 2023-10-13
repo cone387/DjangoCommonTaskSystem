@@ -22,6 +22,6 @@ urlpatterns = [
 
     path('system/scheduler/<slug:action>/', views.SchedulerView.as_view(), name='scheduler-action'),
     path('system/consumer/<slug:action>/', views.ConsumerView.as_view(), name='consumer-action'),
-    path('client/<slug:action>/', views.ClientView.action, name='client-action'),
+    path('client/<slug:action>/', views.ClientView.as_view(), name='client-action'),
 
 ] + router.urls

@@ -1,10 +1,16 @@
 import threading
 import logging
+import enum
+import os
 from typing import Callable
 from django_common_task_system.cache_service import cache_agent
 
 
-logger = logging.getLogger('program')
+class ProgramAction(str, enum.Enum):
+    START = 'start'
+    STOP = 'stop'
+    RESTART = 'restart'
+    LOG = 'log'
 
 
 class ProgramState(dict):
@@ -26,32 +32,27 @@ class ProgramState(dict):
         return kwargs or self
 
     def push(self, **kwargs):
-        try:
-            cache_agent.hset(self.key, mapping=kwargs)
-        except Exception as e:
-            logger.exception(e)
+        cache_agent.hset(self.key, mapping=kwargs)
 
     def commit_and_push(self, **kwargs):
         return self.push(**self.commit(**kwargs))
 
     def pull(self):
-        try:
-            state = cache_agent.hgetall(self.key)
-            for k, v in state.items():
-                setattr(self, k, v)
-        except Exception as e:
-            logger.exception(e)
+        state = cache_agent.hgetall(self.key)
+        for k, v in state.items():
+            setattr(self, k, v)
 
 
 class Program:
     state_class = ProgramState
     state_key = ''
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, logger: logging.Logger = None):
         assert self.state_key, 'state_key must be set'
+        self._event = threading.Event()
         self.state = self.state_class(self.state_key)
         self.program_name = name or self.__class__.__name__
-        self.logger = logging.getLogger(self.program_name.lower())
+        self.logger = logger or logging.getLogger(self.program_name.lower())
 
     @property
     def is_running(self):
@@ -59,7 +60,7 @@ class Program:
 
     @property
     def program_id(self) -> int:
-        raise NotImplementedError
+        return os.getpid()
 
     def init_state(self, **kwargs):
         self.state.commit_and_push(
@@ -78,13 +79,13 @@ class Program:
             self.init_state()
             start_program()
             self.state.commit_and_push(is_running=True, ident=self.program_id)
-            logger.info('%s started, pid: %s' % (self, self.program_id))
+            self.logger.info('%s started, pid: %s' % (self, self.program_id))
             error = ''
-        logger.info(error)
+        self.logger.info(error)
         return error
 
-    def stop(self) -> str:
-        raise NotImplementedError
+    def stop(self):
+        self._event.clear()
 
     def __str__(self):
         return "Program(%s)" % self.__class__.__name__
@@ -109,19 +110,23 @@ class ProgramAgent:
             error = self._program.start_if_not_started()
             self._lock.release()
         else:
-            error = 'another action to Program(%s) is processing' % self._program_class.__name__
+            error = 'another action to %s is processing' % self._program
         return error
 
     def stop(self) -> str:
         if not self.is_running:
-            error = 'Program(%s) have not started' % self._program_class.__name__
+            error = '%s have not started' % self._program
         else:
-            if not self._lock.acquire(blocking=False):
-                error = 'another action to Program(%s) is processing' % self._program_class.__name__
-            else:
-                error = self.stop()
+            if self._lock.acquire(blocking=False):
+                error = self._program.stop()
+                self.state.commit_and_push(
+                    is_running=False,
+                    ident=None
+                )
                 self._program = self._program_class()
                 self._lock.release()
+            else:
+                error = 'another action to %s is processing' % self._program
         return error
 
     def restart(self) -> str:

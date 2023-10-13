@@ -13,7 +13,7 @@ from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.schedule import util as schedule_util
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_save
 from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
@@ -584,10 +584,11 @@ class Overview(models.Model):
     name = models.CharField(max_length=100, verbose_name='名称')
     state = models.CharField(max_length=100, verbose_name='状态')
     action = models.CharField(max_length=100, verbose_name='操作')
+    position = models.IntegerField(verbose_name='位置', default=99)
 
     objects = CustomManager()
 
     class Meta:
         managed = False
         verbose_name = verbose_name_plural = '系统总览'
-        ordering = ('name',)
+        ordering = ('position',)

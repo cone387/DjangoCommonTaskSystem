@@ -3,18 +3,16 @@ import traceback
 import socket
 import logging
 from queue import Queue
-from typing import Callable
 from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
-from django_common_task_system.cache_service import cache_agent
 from django_common_task_system.program import Program, ProgramState
 from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
 
 
 IP = socket.gethostbyname(socket.gethostname())
-logger = logging.getLogger('consume')
+logger = logging.getLogger('consumer')
 ScheduleLog = get_schedule_log_model()
 
 
@@ -171,88 +169,33 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
 class ConsumerState(ProgramState):
     def __init__(self, key):
         super(ConsumerState, self).__init__(key)
-        # self.key = key
-        # self.ident = None
-        # self.name = None
         self.succeed_count = 0
         self.failed_count = 0
         self.last_process_time = ''
         self.log_file = ''
-        # self.is_running = False
-
-    def json(self):
-        return dict(
-            ident=self.ident,
-            name=self.engine,
-            succeed_count=self.succeed_count,
-            failed_count=self.failed_count,
-            last_process_time=self.last_process_time,
-            log_file=self.log_file,
-            is_running=self.is_running
-        )
-
-    # def update(self, **kwargs):
-    #     if not kwargs:
-    #         kwargs = dict(
-    #             ident=self.ident,
-    #             succeed_count=self.succeed_count,
-    #             failed_count=self.failed_count,
-    #             last_process_time=self.last_process_time,
-    #             is_running=self.is_running
-    #         )
-    #     else:
-    #         for k, v in kwargs.items():
-    #             setattr(self, k, v)
-    #     try:
-    #         cache_agent.hset(self.key, mapping=kwargs)
-    #     except Exception as e:
-    #         logger.exception(e)
-    #
-    # def pull(self):
-    #     try:
-    #         state = cache_agent.hgetall(self.key)
-    #         for k, v in state.items():
-    #             setattr(self, k, v)
-    #     except Exception as e:
-    #         logger.exception(e)
 
 
 class Consumer(Program):
-    # key = 'consumer'
-    # log_file = add_file_handler(logger)
-    # state = ConsumerState(key)
-    # name = 'Consumer'
     state_class = ConsumerState
     state_key = 'consumer'
 
     def __init__(self, queue: Queue):
-        super(Consumer, self).__init__(name='Consumer')
+        super(Consumer, self).__init__(name='Consumer', logger=logger)
         self.queue = queue
         self.log_file = add_file_handler(self.logger)
-
-    # @property
-    # def id(self):
-    #     return os.getpid()
-    #
-    # @property
-    # def is_running(self):
-    #     return self.state.is_running
 
     def init_state(self):
         super(Consumer, self).init_state(
             log_file=self.log_file,
         )
 
-    @property
-    def program_id(self) -> int:
-        return os.getpid()
-
     def run(self):
         queue = self.queue
         state = self.state
+        event = self._event
         load_executors()
         logger.info('system schedule execution process started')
-        while True:
+        while event.is_set():
             state.update()
             try:
                 schedule = queue.get()
@@ -263,71 +206,13 @@ class Consumer(Program):
                 state.succeed_count += 1
             except Exception as e:
                 state.failed_count += 1
-                logger.exception(e)
+                self.logger.exception(e)
                 try:
                     ExceptionReport.objects.create(
                         ip=IP,
                         content=traceback.format_exc(),
                     )
                 except Exception as e:
-                    logger.exception(e)
+                    self.logger.exception(e)
             finally:
                 state.last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # def start_if_not_started(self):
-    #     start: Callable[[], None] = getattr(self, 'start', None)
-    #     assert start, 'runner must have start method'
-    #     if self.state.is_running:
-    #         error = 'execution thread already started, pid: %s' % self.state.ident
-    #         logger.info(error)
-    #     else:
-    #         start()
-    #         self.state.update(ident=self.id, log_file=self.log_file,
-    #                           runner=self.__class__.__name__, is_running=True, name=self.name)
-    #         logger.info('execution thread started, pid: %s' % self.id)
-    #         error = ''
-    #     return error
-
-    def stop(self):
-        raise NotImplementedError
-
-
-def consume(queue):
-    consumer = Consumer(queue)
-    consumer.run()
-
-
-# class ConsumerAgent:
-#     def __init__(self, consumer_class):
-#         self._consumer_class = consumer_class
-#         self._consumer: Consumer = consumer_class()
-#         self._lock = threading.Lock()
-#
-#     @property
-#     def is_running(self):
-#         return self._consumer.is_running
-#
-#     @property
-#     def state(self):
-#         return self._consumer.state
-#
-#     def start(self):
-#         return self._consumer.start_if_not_started()
-#
-#     def stop(self):
-#         if not self.state.is_running:
-#             error = 'consumer not started'
-#         else:
-#             if not self._lock.acquire(blocking=False):
-#                 error = 'another action to consumer is processing'
-#             else:
-#                 error = self._consumer.stop()
-#                 self._consumer = self._consumer_class()
-#                 self._lock.release()
-#         return error
-#
-#     def restart(self):
-#         error = self.stop()
-#         if not error:
-#             error = self.start()
-#         return error

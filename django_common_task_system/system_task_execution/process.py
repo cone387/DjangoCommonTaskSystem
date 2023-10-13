@@ -1,6 +1,6 @@
 import os
 from multiprocessing import Process
-from django_common_task_system.system_task_execution.system_task_execution.consumer import Consumer, ConsumeAgent
+from django_common_task_system.system_task_execution.system_task_execution.consumer import Consumer
 from django_common_task_system.builtins import builtins
 
 
@@ -18,4 +18,5 @@ class ScheduleConsumerProcess(Consumer, Process):
         super(ScheduleConsumerProcess, self).run()
 
     def stop(self):
+        super(ScheduleConsumerProcess, self).stop()
         self.kill()
