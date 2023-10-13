@@ -1,34 +1,19 @@
 from logging.handlers import RotatingFileHandler
 from multiprocessing import Process, set_start_method
 from django_common_task_system.choices import TaskClientStatus, ClientEngineType
-from django_common_task_system.schedule import backend as scheduler
 from django_common_task_system.models import TaskClient, DockerEngine
 from docker.errors import APIError
-from django.conf import settings
-from typing import Union
-from threading import Lock, Timer, Thread
+from threading import Thread
 from docker.models.containers import Container
-from django_common_task_system.system_task_execution import thread as consume_thread
-from django_common_task_system.system_task_execution.thread import ScheduleConsumerThread, consume_thread
 import os
 import traceback
 import subprocess
 import logging
 import locale
 import docker
-import math
 
 
 SYS_ENCODING = locale.getpreferredencoding()
-
-_current_process: Union[Process, None] = None
-_current_process_lock = Lock()
-
-_schedule_lock = Lock()
-
-
-def current_process():
-    return _current_process
 
 
 def run_in_subprocess(cmd):
@@ -179,144 +164,3 @@ def start_client(client: TaskClient):
     runner = ClientRunner(client)
     thread = Thread(target=runner.start)
     thread.start()
-
-
-def start_consume() -> str:
-    global _current_process, _current_process_lock
-    error = ''
-    if _current_process is not None:
-        error = 'process already started'
-    else:
-        if not _current_process_lock.acquire(blocking=False):
-            error = 'another process is starting'
-        else:
-            from django_common_task_system.builtins import builtins
-            set_start_method('spawn', True)
-            try:
-                _current_process = ScheduleConsumerThread()
-                _current_process.start()
-            except Exception as e:
-                error = str(e)
-            finally:
-                _current_process_lock.release()
-    return error
-
-
-def stop_consume():
-    global _current_process
-    error = ''
-    if _current_process is None:
-        error = 'process not started'
-    else:
-        if not _current_process_lock.acquire(blocking=False):
-            error = 'another process is processing'
-        else:
-            from django_common_task_system.builtins import builtins
-            try:
-                _current_process.kill()
-                _current_process = None
-                _rlock = getattr(builtins.schedule_queues.system.queue, '_rlock', None)
-                if _rlock is not None:
-                    # release _rlock, otherwise the new process will be blocked
-                    try:
-                        _rlock.release()
-                    except RuntimeError:
-                        pass
-            except Exception as e:
-                error = str(e)
-            finally:
-                _current_process_lock.release()
-    return error
-
-
-def restart_consume():
-    error = start_consume()
-    if not error:
-        error = start_consume()
-    return error
-
-
-class PagedLog:
-    def __init__(self, log_file, page_size=10 * 1024):
-        with open(log_file, 'r', encoding='utf-8') as f:
-            size = f.seek(0, os.SEEK_END)
-            self.page_num = math.ceil(size / page_size)
-        self.log_file = log_file
-        self.page_size = page_size
-        self.page_range = range(1, self.page_num + 1)
-        self.current = 1
-        self.max_display_page = 10
-
-    @property
-    def right_offset(self):
-        return max(self.current + self.max_display_page // 2, self.max_display_page)
-
-    @property
-    def left_offset(self):
-        offset = self.current - self.max_display_page // 2
-        if offset < 0:
-            offset = 0
-        return offset
-
-    @property
-    def max_offset(self):
-        return self.page_num - self.max_display_page
-
-    @property
-    def real_page_size(self):
-        return self.page_size // 1024
-
-    def read_page(self, page=0):
-        if page == 0:
-            page = self.page_num
-        if self.page_num == 0:
-            return "log file is empty"
-        if page > self.page_num or page < 1:
-            return f"page({page}) out of range"
-        self.current = page
-        with open(self.log_file, 'r', encoding='utf-8') as f:
-            f.seek((page - 1) * self.page_size, os.SEEK_SET)
-            log = f.read(self.page_size)
-        return log
-
-
-def read_consume_log(page_size=10 * 1024) -> Union[PagedLog, None]:
-    log_file = getattr(settings, 'SYSTEM_PROCESS_LOG_FILE', None)
-    if not os.path.isfile(log_file):
-        return None
-    return PagedLog(log_file, page_size)
-
-
-# def start_schedule():
-#     return scheduler.schedule_thread.start_if_not_started()
-#
-#
-# def listen_schedule_thread():
-#     if scheduler.schedule_thread.is_alive():
-#         Timer(1, listen_schedule_thread).start()
-#     else:
-#         scheduler.schedule_thread.state.is_running = False
-#         _schedule_lock.release()
-#
-#
-# def stop_schedule() -> str:
-#     if not scheduler.schedule_thread.is_running:
-#         error = 'schedule thread not started'
-#     else:
-#         if not _schedule_lock.acquire(blocking=False):
-#             error = 'another action to thread is processing'
-#         else:
-#             if scheduler.schedule_thread.schedule_event.is_set():
-#                 scheduler.schedule_thread.schedule_event.clear()
-#             listen_schedule_thread()
-#             if scheduler.schedule_thread.is_alive():
-#                 error = 'schedule thread is stopping'
-#             else:
-#                 error = ''
-#     return error
-
-
-def read_schedule_log(page_size=10 * 1024) -> Union[PagedLog, None]:
-    if not os.path.isfile(scheduler.schedule_thread.log_file):
-        return None
-    return PagedLog(scheduler.schedule_thread.log_file, page_size)

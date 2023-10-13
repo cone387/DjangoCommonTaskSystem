@@ -96,7 +96,6 @@ class SqlConfigField(forms.MultiValueField):
                 raise forms.ValidationError('连接失败: {}'.format(e))
 
 
-
 class DateTimeRangeWidget(forms.widgets.MultiWidget):
     template_name = 'schedule/datetime_range.html'
 
@@ -336,4 +335,3 @@ class MultiYearDaySelectWidget(forms.TextInput):
 
 class NLPSentenceWidget(forms.TextInput):
     template_name = 'schedule/nlp_input.html'
-

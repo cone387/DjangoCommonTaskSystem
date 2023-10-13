@@ -5,12 +5,14 @@ from django_common_task_system import get_schedule_model, get_schedule_serialize
 from django_common_task_system.models import AbstractSchedule
 from django_common_task_system.utils.logger import add_file_handler
 from django_common_task_system.cache_service import cache_agent
+from django_common_task_system.program import Program, ProgramAgent, ProgramState
 from .config import ScheduleConfig
 from datetime import datetime
 from typing import Callable
 import time
 import logging
 import threading
+import os
 
 
 logger = logging.getLogger('schedule')
@@ -18,47 +20,49 @@ Schedule: AbstractSchedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
 
-class State:
+class SchedulerState(ProgramState):
     def __init__(self, key):
-        self.key = key
-        self.ident = None
+        super(SchedulerState, self).__init__(key)
+        # self.key = key
+        # self.ident = None
+        # self.name = None
         self.scheduled_count = 0
         self.last_schedule_time = ''
-        self.is_running = False
+        self.log_file = ''
+        # self.is_running = False
 
-    def update(self):
-        try:
-            cache_agent.hset(self.key,
-                             ident=self.ident,
-                             scheduled_count=self.scheduled_count,
-                             last_schedule_time=self.last_schedule_time,
-                             is_running=self.is_running)
-        except Exception as e:
-            logger.exception(e)
-
-    def refresh(self):
-        try:
-            state = cache_agent.hgetall('execution-thread')
-            self.ident = state['ident']
-            self.scheduled_count = state['scheduled_count']
-            self.last_schedule_time = state['last_schedule_time']
-        except Exception as e:
-            logger.exception(e)
+    def json(self):
+        return dict(
+            ident=self.ident,
+            name=self.engine,
+            scheduled_count=self.scheduled_count,
+            last_schedule_time=self.last_schedule_time,
+            log_file=self.log_file,
+            is_running=self.is_running
+        )
 
 
-class ScheduleRunner:
-    schedule_event = threading.Event()
-    log_file = add_file_handler(logger)
-    key = 'scheduler'
-    state = State(key)
+class Scheduler(Program):
+    _event = threading.Event()
+    # log_file = add_file_handler(logger)
+    # key = 'scheduler'
+    # state = SchedulerState(key)
+    # name = 'Scheduler'
+    state_class = SchedulerState
+    state_key = 'scheduler'
+
+    def __init__(self):
+        super(Scheduler, self).__init__(name='Scheduler')
+        self.log_file = add_file_handler(self.logger)
+
+    def init_state(self, **kwargs):
+        super(Scheduler, self).init_state(
+            log_file=self.log_file,
+        )
 
     @property
-    def is_running(self):
-        return self.state.is_running
-
-    @property
-    def runner_id(self) -> int:
-        raise NotImplementedError
+    def program_id(self) -> int:
+        return os.getpid()
 
     def produce(self):
         state = self.state
@@ -98,7 +102,7 @@ class ScheduleRunner:
             schedule_result[queue_instance.code] = put_size
             # 诡异的是这里的scheduled_count运行几次后还会变成0, 为什么?
             count += put_size
-        state.last_schedule_time = now
+        state.last_schedule_time = now.strftime('%Y-%m-%d %H:%M:%S')
         for queue_code, put_size in schedule_result.items():
             logger.info('schedule %s schedules to %s' % (put_size, queue_code))
         state.scheduled_count += count
@@ -110,10 +114,10 @@ class ScheduleRunner:
     def run(self) -> None:
         add_file_handler(logger, self.log_file)
         # 等待系统初始化完成, 5秒后自动开始
-        self.schedule_event.wait(timeout=5)
-        self.schedule_event.set()
+        self._event.wait(timeout=5)
+        self._event.set()
         SCHEDULE_INTERVAL = getattr(settings, 'SCHEDULE_INTERVAL', 1)
-        is_set = self.schedule_event.is_set
+        is_set = self._event.is_set
         while is_set():
             try:
                 self.produce()
@@ -121,71 +125,74 @@ class ScheduleRunner:
                 logger.exception(e)
             time.sleep(SCHEDULE_INTERVAL)
 
-    def start_if_not_started(self):
-        start: Callable[[], None] = getattr(self, 'start', None)
-        assert start, 'runner must have start method'
-        if self.state.is_running:
-            error = 'schedule thread already started, pid: %s' % self.state.ident
-        else:
-            start()
-            cache_agent.hset(self.key, ident=self.runner_id, log_file=self.log_file,
-                             runner=self.__class__.__name__, is_running=True)
-            logger.info('schedule thread started, pid: %s' % self.runner_id)
-            error = ''
-        logger.info(error)
-        return error
+    # def start_if_not_started(self):
+    #     start: Callable[[], None] = getattr(self, 'start', None)
+    #     assert start, 'runner must have start method'
+    #     if self.state.is_running:
+    #         error = 'schedule thread already started, pid: %s' % self.state.ident
+    #     else:
+    #         start()
+    #         self.state.update(ident=self.runner_id, log_file=self.log_file,
+    #                           runner=self.__class__.__name__, is_running=True, name=self.name)
+    #         logger.info('schedule thread started, pid: %s' % self.runner_id)
+    #         error = ''
+    #     logger.info(error)
+    #     return error
+
+    def stop(self):
+        self._event.clear()
 
 
-class ScheduleThread(ScheduleRunner, threading.Thread):
+class SchedulerThread(Scheduler, threading.Thread):
     def __init__(self):
-        super().__init__(daemon=True)
+        super().__init__()
+        threading.Thread.__init__(self, daemon=True, name=self.program_name)
 
     @property
-    def runner_id(self) -> int:
+    def program_id(self) -> int:
         return self.ident
 
-
-class ScheduleAgent:
-    def __init__(self):
-        self._scheduler: ScheduleThread = ScheduleThread()
-        self._lock = threading.Lock()
-
-    @property
-    def state(self):
-        return self._scheduler.state
-
-    def start(self):
-        return self._scheduler.start_if_not_started()
-
-    def listen_state(self):
-        if self._scheduler.is_alive():
-            threading.Timer(1, self.listen_state).start()
-        else:
-            self.state.is_running = False
-            self._lock.release()
-
-    def stop(self, wait=False):
-        if self._scheduler is None or not self.state.is_running:
-            error = 'schedule thread not started'
-        else:
-            if not self._lock.acquire(blocking=False):
-                error = 'another action to thread is processing'
-            else:
-                if self._scheduler.schedule_event.is_set():
-                    self._scheduler.schedule_event.clear()
-                self.listen_state()
-                if self._scheduler.is_alive():
-                    error = 'schedule thread is stopping'
-                else:
-                    _scheduler = ScheduleThread()
-                    error = ''
-        return error
-
-    def restart(self):
-        error = self.stop(wait=True)
-        if not error:
-            error = self.start()
-        return error
+    def stop(self):
+        super(SchedulerThread, self).stop()
+        while self.is_alive():
+            time.sleep(0.5)
 
 
-schedule_agent = ScheduleAgent()
+# class SchedulerAgent:
+#     def __init__(self, schedule_class=SchedulerThread):
+#         self._scheduler_class = schedule_class
+#         self._scheduler: Scheduler = schedule_class()
+#         self._lock = threading.Lock()
+#
+#     @property
+#     def is_running(self):
+#         return self._scheduler.is_running
+#
+#     @property
+#     def state(self):
+#         return self._scheduler.state
+#
+#     def start(self):
+#         return self._scheduler.start_if_not_started()
+#
+#     def stop(self):
+#         if self._scheduler is None or not self.state.is_running:
+#             error = 'schedule thread not started'
+#         else:
+#             if not self._lock.acquire(blocking=False):
+#                 error = 'another action to thread is processing'
+#             else:
+#                 error = self.stop()
+#                 self._scheduler = self._scheduler_class()
+#                 self._lock.release()
+#
+#         return error
+#
+#     def restart(self):
+#         error = self.stop()
+#         if not error:
+#             error = self.start()
+#         return error
+
+
+scheduler_agent = ProgramAgent(program_class=SchedulerThread)

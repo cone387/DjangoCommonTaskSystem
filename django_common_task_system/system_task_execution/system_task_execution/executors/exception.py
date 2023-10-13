@@ -1,6 +1,6 @@
 from django.urls import reverse
 import requests
-from django_common_task_system.system_task_execution.system_task_execution.executor import (
+from django_common_task_system.system_task_execution.system_task_execution.consumer import (
     Executor, BaseExecutor, EmptyResult, Failed, NoRetryException, PartialFailed)
 from django_common_task_system.builtins import builtins
 from django_common_task_system.schedule import util as schedule_util

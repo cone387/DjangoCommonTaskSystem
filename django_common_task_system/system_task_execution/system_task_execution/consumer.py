@@ -8,6 +8,7 @@ from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
 from django_common_task_system.cache_service import cache_agent
+from django_common_task_system.program import Program, ProgramState
 from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
 
@@ -154,6 +155,7 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     try:
         module = importlib.import_module(module_path)
     except ImportError:
+        logger.exception('import module %s failed' % module_path)
         return
     if not hasattr(module, '__loaded__'):
         module_file = Path(module.__file__)
@@ -166,53 +168,84 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     module.__loaded__ = True
 
 
-class State:
+class ConsumerState(ProgramState):
     def __init__(self, key):
-        self.key = key
-        self.ident = None
+        super(ConsumerState, self).__init__(key)
+        # self.key = key
+        # self.ident = None
+        # self.name = None
         self.succeed_count = 0
         self.failed_count = 0
         self.last_process_time = ''
-        self.is_running = False
+        self.log_file = ''
+        # self.is_running = False
 
-    def update(self):
-        try:
-            cache_agent.hset(self.key,
-                             ident=self.ident,
-                             succeed_count=self.succeed_count,
-                             failed_count=self.failed_count,
-                             last_process_time=self.last_process_time,
-                             is_running=self.is_running)
-        except Exception as e:
-            logger.exception(e)
+    def json(self):
+        return dict(
+            ident=self.ident,
+            name=self.engine,
+            succeed_count=self.succeed_count,
+            failed_count=self.failed_count,
+            last_process_time=self.last_process_time,
+            log_file=self.log_file,
+            is_running=self.is_running
+        )
 
-    def refresh(self):
-        try:
-            state = cache_agent.hgetall('execution-thread')
-            self.ident = state['ident']
-            self.succeed_count = state['succeed_count']
-            self.failed_count = state['failed_count']
-            self.last_process_time = state['last_process_time']
-        except Exception as e:
-            logger.exception(e)
+    # def update(self, **kwargs):
+    #     if not kwargs:
+    #         kwargs = dict(
+    #             ident=self.ident,
+    #             succeed_count=self.succeed_count,
+    #             failed_count=self.failed_count,
+    #             last_process_time=self.last_process_time,
+    #             is_running=self.is_running
+    #         )
+    #     else:
+    #         for k, v in kwargs.items():
+    #             setattr(self, k, v)
+    #     try:
+    #         cache_agent.hset(self.key, mapping=kwargs)
+    #     except Exception as e:
+    #         logger.exception(e)
+    #
+    # def pull(self):
+    #     try:
+    #         state = cache_agent.hgetall(self.key)
+    #         for k, v in state.items():
+    #             setattr(self, k, v)
+    #     except Exception as e:
+    #         logger.exception(e)
 
 
-class Consumer:
-    started = False
-    key = 'consumer'
-    log_file = add_file_handler(logger)
-    state = State(key)
+class Consumer(Program):
+    # key = 'consumer'
+    # log_file = add_file_handler(logger)
+    # state = ConsumerState(key)
+    # name = 'Consumer'
+    state_class = ConsumerState
+    state_key = 'consumer'
 
     def __init__(self, queue: Queue):
+        super(Consumer, self).__init__(name='Consumer')
         self.queue = queue
+        self.log_file = add_file_handler(self.logger)
+
+    # @property
+    # def id(self):
+    #     return os.getpid()
+    #
+    # @property
+    # def is_running(self):
+    #     return self.state.is_running
+
+    def init_state(self):
+        super(Consumer, self).init_state(
+            log_file=self.log_file,
+        )
 
     @property
-    def id(self):
+    def program_id(self) -> int:
         return os.getpid()
-
-    @property
-    def is_running(self):
-        return self.state.is_running
 
     def run(self):
         queue = self.queue
@@ -241,21 +274,60 @@ class Consumer:
             finally:
                 state.last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    def start_if_not_started(self):
-        start: Callable[[], None] = getattr(self, 'start', None)
-        assert start, 'runner must have start method'
-        if self.state.is_running:
-            error = 'execution thread already started, pid: %s' % self.state.ident
-            logger.info(error)
-        else:
-            start()
-            cache_agent.hset(self.key, ident=self.id, log_file=self.log_file,
-                             runner=self.__class__.__name__, is_running=True)
-            logger.info('execution thread started, pid: %s' % self.id)
-            error = ''
-        return error
+    # def start_if_not_started(self):
+    #     start: Callable[[], None] = getattr(self, 'start', None)
+    #     assert start, 'runner must have start method'
+    #     if self.state.is_running:
+    #         error = 'execution thread already started, pid: %s' % self.state.ident
+    #         logger.info(error)
+    #     else:
+    #         start()
+    #         self.state.update(ident=self.id, log_file=self.log_file,
+    #                           runner=self.__class__.__name__, is_running=True, name=self.name)
+    #         logger.info('execution thread started, pid: %s' % self.id)
+    #         error = ''
+    #     return error
+
+    def stop(self):
+        raise NotImplementedError
 
 
 def consume(queue):
     consumer = Consumer(queue)
     consumer.run()
+
+
+# class ConsumerAgent:
+#     def __init__(self, consumer_class):
+#         self._consumer_class = consumer_class
+#         self._consumer: Consumer = consumer_class()
+#         self._lock = threading.Lock()
+#
+#     @property
+#     def is_running(self):
+#         return self._consumer.is_running
+#
+#     @property
+#     def state(self):
+#         return self._consumer.state
+#
+#     def start(self):
+#         return self._consumer.start_if_not_started()
+#
+#     def stop(self):
+#         if not self.state.is_running:
+#             error = 'consumer not started'
+#         else:
+#             if not self._lock.acquire(blocking=False):
+#                 error = 'another action to consumer is processing'
+#             else:
+#                 error = self._consumer.stop()
+#                 self._consumer = self._consumer_class()
+#                 self._lock.release()
+#         return error
+#
+#     def restart(self):
+#         error = self.stop()
+#         if not error:
+#             error = self.start()
+#         return error

@@ -1,3 +1,4 @@
+import os
 from .builtins import builtins
 from django.contrib import admin, messages
 from django.urls import reverse
@@ -10,6 +11,8 @@ import docker
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
 from django_common_task_system import client as schedule_client
+from django_common_task_system.schedule.scheduler import scheduler_agent
+from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.schedule import util as schedule_util
 from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
@@ -689,8 +692,8 @@ class OverviewAdmin(admin.ModelAdmin):
                models.TaskClient._meta.model_name
 
     @staticmethod
-    def action_process(obj: models.Overview):
-        action_url_name = 'system-process-action'
+    def action_consumer(obj: models.Overview):
+        action_url_name = 'consumer-action'
         log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log', ))
         stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop', ))
         start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start', ))
@@ -715,8 +718,8 @@ class OverviewAdmin(admin.ModelAdmin):
         )
 
     @staticmethod
-    def action_schedule_thread(obj: models.Overview):
-        action_url_name = 'schedule-thread-action'
+    def action_scheduler(obj: models.Overview):
+        action_url_name = 'scheduler-action'
         log_action = '<a href="%s" target="_blank">查看日志</a>' % reverse(action_url_name, args=('log',))
         stop_action = '<a href="%s" target="_blank">停止</a>' % reverse(action_url_name, args=('stop',))
         start_action = '<a href="%s" target="_blank">开启</a>' % reverse(action_url_name, args=('start',))
@@ -727,22 +730,23 @@ class OverviewAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         model = models.Overview
-        system_schedule_process = schedule_client.current_process()
-        if system_schedule_process is None:
-            state = "未启动"
+        consumer_agent.state.pull()
+        if not consumer_agent.is_running:
+            consumer_state = "未启动"
         else:
-            state = {
-                '进程ID': system_schedule_process.pid,
-                '进程状态': '运行中' if system_schedule_process.is_alive() else '已停止',
-                '已处理计划数量': (system_schedule_process.success_count.value + system_schedule_process.failed_count.value),
-                '成功计划数量': system_schedule_process.success_count.value,
-                '失败计划数量': system_schedule_process.failed_count.value,
-                '最近处理时间': datetime.fromtimestamp(
-                    system_schedule_process.last_process_time.value).strftime('%Y-%m-%d %H:%M:%S'),
+            state = consumer_agent.state
+            consumer_state = {
+                '进程ID': state.ident,
+                '进程状态': '运行中',
+                '已处理计划数量': (state.succeed_count + state.failed_count),
+                '成功计划数量': state.succeed_count,
+                '失败计划数量': state.failed_count,
+                '最近处理时间': state.last_process_time,
+                '日志文件': state.log_file.replace(os.getcwd(), '')
             }
-        model.objects['process'] = model(
+        model.objects['consumer'] = model(
             name="系统计划处理进程",
-            state=state
+            state=consumer_state
         )
 
         model.objects['enabled_schedule'] = model(
@@ -777,21 +781,22 @@ class OverviewAdmin(admin.ModelAdmin):
                 "客户端数量": models.TaskClient.objects.count()
             },
         )
-        schedule_thread = schedule_client.current_schedule_thread()
-        if schedule_thread is None:
-            state = "未启动"
+        scheduler_agent.state.pull()
+        if not scheduler_agent.is_running:
+            scheduler_state = "未启动"
         else:
-            state = {
-                "运行ID": schedule_thread.ident,
-                "线程名称": schedule_thread.name,
-                "线程状态": "运行中" if schedule_thread.is_alive() else "已停止",
-                "已调度计划数量": schedule_thread.scheduled_count,
-                "最近调度时间": schedule_thread.last_schedule_time.strftime('%Y-%m-%d %H:%M:%S')
-                if schedule_thread.last_schedule_time else None,
+            state = scheduler_agent.state
+            scheduler_state = {
+                "运行ID": state.ident,
+                "线程名称": state.name,
+                "线程状态": "运行中",
+                "已调度计划数量": state.scheduled_count,
+                "最近调度时间": state.last_schedule_time,
+                "日志文件": state.log_file.replace(os.getcwd(), '')
             }
-        model.objects['schedule_thread'] = model(
+        model.objects['scheduler'] = model(
             name="计划调度线程",
-            state=state,
+            state=scheduler_state,
         )
         for k, v in model.objects.items():
             v.action = k

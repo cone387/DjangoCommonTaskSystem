@@ -1,6 +1,6 @@
 from django.db import connection as django_connection
 from django_common_task_system.builtins import builtins
-from django_common_task_system.system_task_execution.system_task_execution.executor import (
+from django_common_task_system.system_task_execution.system_task_execution.consumer import (
     Executor, BaseExecutor, Failed)
 import pymysql
 

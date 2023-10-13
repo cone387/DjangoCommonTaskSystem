@@ -74,9 +74,10 @@ def reload_server():
 def _start_system_process():
     import django
     import os
+    import time
     django.setup()
-    from django_common_task_system.schedule.backend import schedule_thread
-    from django_common_task_system.system_task_execution.thread import consume_thread
+    from django_common_task_system.schedule.scheduler import scheduler_agent
+    from django_common_task_system.system_task_execution import consumer_agent
 
     # 因为该进程是由Process(daemon=True), 所以不能在该进程中再启动子进程，需要放在外面启动
     # AssertionError: daemonic processes are not allowed to have children
@@ -84,15 +85,17 @@ def _start_system_process():
     # ensure_service_available()
 
     # 检查是否其它进程已经启动了
-    schedule_thread.start_if_not_started()
-    consume_thread.start_if_not_started()
+    scheduler_agent.start()
+    consumer_agent.start()
 
-    if schedule_thread.started or consume_thread.started:
+    if scheduler_agent.is_running or consumer_agent.is_running:
         print("system process started, pid: %s" % os.getpid())
-        if schedule_thread.started:
-            schedule_thread.join()
-        if consume_thread is not None:
-            consume_thread.join()
+        # if scheduler_agent.is_running:
+        #     schedule_thread.join()
+        # if consumer_agent is not None:
+        #     consumer_agent.join()
+        while True:
+            time.sleep(10)
     else:
         print("system process started already, ignored")
 
