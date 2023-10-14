@@ -36,9 +36,6 @@ if not hasattr(settings, 'SCHEDULE_LOG_MODEL'):
 if not hasattr(settings, 'SCHEDULE_SERIALIZER'):
     setattr(settings, 'SCHEDULE_SERIALIZER', 'django_common_task_system.serializers.QueueScheduleSerializer')
 
-if not hasattr(settings, 'SYSTEM_PROCESS_LOG_FILE'):
-    setattr(settings, 'SYSTEM_PROCESS_LOG_FILE', os.path.join(os.getcwd(), 'logs', 'system-task-execution.log'))
-
 
 def get_task_model():
     """

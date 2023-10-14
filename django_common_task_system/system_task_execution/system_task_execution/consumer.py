@@ -1,3 +1,4 @@
+import os
 import traceback
 import socket
 import logging
@@ -5,12 +6,13 @@ from queue import Queue
 from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
+from django_common_task_system.program import Program, ProgramState
+from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
-from multiprocessing import Value
 
 
 IP = socket.gethostbyname(socket.gethostname())
-logger = logging.getLogger('client')
+logger = logging.getLogger('consumer')
 ScheduleLog = get_schedule_log_model()
 
 
@@ -151,6 +153,7 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     try:
         module = importlib.import_module(module_path)
     except ImportError:
+        logger.exception('import module %s failed' % module_path)
         return
     if not hasattr(module, '__loaded__'):
         module_file = Path(module.__file__)
@@ -163,26 +166,53 @@ def load_executors(module_path='django_common_task_system.system_task_execution.
     module.__loaded__ = True
 
 
-def start_client(queue: Queue, success_count: Value, failed_count: Value, last_process_time: Value):
-    logger.info('system schedule execution process started')
-    load_executors()
-    while True:
-        schedule = queue.get()
-        try:
-            schedule = Schedule(schedule)
-            logger.info('get schedule: %s', schedule)
-            executor = Executor(schedule)
-            executor.start()
-            success_count.value += 1
-        except Exception as e:
-            failed_count.value += 1
-            logger.exception(e)
+class ConsumerState(ProgramState):
+    def __init__(self, key):
+        super(ConsumerState, self).__init__(key)
+        self.succeed_count = 0
+        self.failed_count = 0
+        self.last_process_time = ''
+        self.log_file = ''
+
+
+class Consumer(Program):
+    state_class = ConsumerState
+    state_key = 'consumer'
+
+    def __init__(self, queue: Queue):
+        super(Consumer, self).__init__(name='Consumer', logger=logger)
+        self.queue = queue
+        self.log_file = add_file_handler(self.logger)
+
+    def init_state(self):
+        super(Consumer, self).init_state(
+            log_file=self.log_file,
+        )
+
+    def run(self):
+        queue = self.queue
+        state = self.state
+        event = self._event
+        load_executors()
+        logger.info('system schedule execution process started')
+        while event.is_set():
+            state.update()
             try:
-                ExceptionReport.objects.create(
-                    ip=IP,
-                    content=traceback.format_exc(),
-                )
+                schedule = queue.get()
+                schedule = Schedule(schedule)
+                logger.info('get schedule: %s', schedule)
+                executor = Executor(schedule)
+                executor.start()
+                state.succeed_count += 1
             except Exception as e:
-                logger.exception(e)
-        finally:
-            last_process_time.value = datetime.now().timestamp()
+                state.failed_count += 1
+                self.logger.exception(e)
+                try:
+                    ExceptionReport.objects.create(
+                        ip=IP,
+                        content=traceback.format_exc(),
+                    )
+                except Exception as e:
+                    self.logger.exception(e)
+            finally:
+                state.last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')

@@ -73,26 +73,48 @@ def reload_server():
 
 def _start_system_process():
     import django
+    import os
+    import time
     django.setup()
-    from django_common_task_system.schedule.backend import ScheduleThread
-    from django_common_task_system.system_task_execution.main import SystemScheduleThread
-    from django_common_task_system.builtins import builtins
+    from django_common_task_system.schedule.scheduler import scheduler_agent
+    from django_common_task_system.system_task_execution import consumer_agent
 
-    schedule_thread = ScheduleThread()
-    schedule_thread.start()
-    execution_thread = SystemScheduleThread(builtins.schedule_queues.system.queue)
-    execution_thread.start()
-    schedule_thread.join()
-    execution_thread.join()
+    # 因为该进程是由Process(daemon=True), 所以不能在该进程中再启动子进程，需要放在外面启动
+    # AssertionError: daemonic processes are not allowed to have children
+    # from django_common_task_system.cache_service import ensure_service_available
+    # ensure_service_available()
+
+    # 检查是否其它进程已经启动了
+    scheduler_agent.start()
+    consumer_agent.start()
+
+    if scheduler_agent.is_running or consumer_agent.is_running:
+        print("system process started, pid: %s" % os.getpid())
+        # if scheduler_agent.is_running:
+        #     schedule_thread.join()
+        # if consumer_agent is not None:
+        #     consumer_agent.join()
+        while True:
+            time.sleep(10)
+    else:
+        print("system process started already, ignored")
 
 
 def start_system_process():
-    from multiprocessing import Process, set_start_method
-    set_start_method('spawn')
-    process = Process(target=_start_system_process, daemon=True)
-    process.start()
-    with open('.system_process.pid', 'w') as f:
-        f.write(str(process.pid))
+    if os.environ.get('RUN_MAIN') == 'true':
+        from multiprocessing import Process, set_start_method
+        set_start_method('spawn', force=True)
+        process = Process(target=_start_system_process, daemon=True)
+        process.start()
+
+
+def ensure_cache_service_running():
+    import django
+    django.setup()
+    # from multiprocessing import set_start_method
+    # set_start_method('spawn')
+    from django_common_task_system.cache_service import ensure_service_available
+    ensure_service_available()
 
 
 def main():
@@ -119,6 +141,7 @@ def main():
     if args.option == 'init':
         init_server(args)
     elif args.option == 'start':
+        ensure_cache_service_running()
         start_system_process()
         start_server(args)
     elif args.option == 'stop':
@@ -126,7 +149,8 @@ def main():
     elif args.option == 'reload':
         reload_server()
     else:
-        if sys.argv[1] == 'runserver':
+        if len(sys.argv) > 1 and sys.argv[1] == 'runserver':
+            ensure_cache_service_running()
             start_system_process()
         execute_from_command_line(sys.argv)
 

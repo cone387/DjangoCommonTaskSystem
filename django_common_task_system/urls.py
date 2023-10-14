@@ -20,9 +20,8 @@ urlpatterns = [
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
 
-    path('client/system/<slug:action>/', views.ScheduleClientView.system_process_action, name='system-process-action'),
-    path('client/schedule/<slug:action>/', views.ScheduleClientView.schedule_thread_action,
-         name='schedule-thread-action'),
-    path('client/<slug:action>/', views.ScheduleClientView.action, name='client-action'),
+    path('system/scheduler/<slug:action>/', views.SchedulerView.as_view(), name='scheduler-action'),
+    path('system/consumer/<slug:action>/', views.ConsumerView.as_view(), name='consumer-action'),
+    path('client/<slug:action>/', views.ClientView.as_view(), name='client-action'),
 
 ] + router.urls

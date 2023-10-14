@@ -250,7 +250,7 @@ class ScheduleQueueForm(forms.ModelForm):
         if not self.errors:
             module = cleaned_data.get('module')
             config = cleaned_data.get('config')
-            config.setdefault('name', 'DjangoCTSQ:%s' % cleaned_data['code'])
+            config.setdefault('name', cleaned_data['code'])
             queueCls = import_string(module)
             validate_config = getattr(queueCls, 'validate_config', None)
             if validate_config:
