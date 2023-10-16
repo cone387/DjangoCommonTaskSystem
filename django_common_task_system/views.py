@@ -20,15 +20,15 @@ from django_common_objects.rest_view import UserListAPIView, UserRetrieveAPIView
 from rest_framework.request import Request
 from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
-from django_common_task_system.schedule.scheduler import scheduler_agent
+from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.program import ProgramAction, ProgramAgent
 from .choices import TaskClientStatus, ScheduleStatus
-from .models import TaskClient
+from .models import Consumer
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
-from . import client as schedule_client
+from . import consumer
 from .log import PagedLog
 from typing import List, Dict, Union
 import os
@@ -94,11 +94,11 @@ def delete_task(sender, instance: Task, **kwargs):
                 os.rmdir(path)
 
 
-@receiver(post_save, sender=models.TaskClient)
-def add_client(sender, instance: models.TaskClient, created, **kwargs):
+@receiver(post_save, sender=models.Consumer)
+def add_client(sender, instance: models.Consumer, created, **kwargs):
     # thread = Thread(target=schedule_client.start_client, args=(instance,))
     # thread.start()
-    schedule_client.start_client(instance)
+    consumer.consume(instance)
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
@@ -318,14 +318,14 @@ class ClientView(APIView):
 
     def get(self, request: Request, action: str):
         if action == 'start':
-            client = TaskClient.objects.create()
+            client = Consumer.objects.create()
             return Response({'client_id': client.id})
         if action == 'register':
             return ClientView.register_client(request)
         client_id = request.GET.get('client_id', '')
         if not client_id.isdigit():
             return Response({'error': 'invalid client_id: %s' % client_id}, status=status.HTTP_400_BAD_REQUEST)
-        client: TaskClient = TaskClient.objects.get(int(client_id))
+        client: Consumer = Consumer.objects.get(int(client_id))
         if client is None:
             raise NotFound('TaskClient(%s)不存在' % client_id)
         if action == 'stop':
@@ -369,7 +369,7 @@ class ClientView(APIView):
         subscription_url = data.get('subscription_url')
         subscription_kwargs = data.get('subscription_kwargs')
         process_id = data.get('process_id')
-        client = TaskClient(container_id=container_id,
+        client = Consumer(container_id=container_id,
                             subscription_url=subscription_url,
                             startup_log='启动成功',
                             settings=settings,
@@ -412,8 +412,8 @@ class ProgramViewMixin:
                         status=status.HTTP_400_BAD_REQUEST if error else status.HTTP_200_OK)
 
 
-class SchedulerView(ProgramViewMixin, APIView):
-    agent = scheduler_agent
+class ProducerView(ProgramViewMixin, APIView):
+    agent = producer_agent
 
 
 class ConsumerView(ProgramViewMixin, APIView):

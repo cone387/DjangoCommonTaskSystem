@@ -70,6 +70,9 @@ class Program:
             **kwargs
         )
 
+    def run(self) -> None:
+        raise NotImplementedError
+
     def start_if_not_started(self) -> str:
         start_program: Callable[[], None] = getattr(self, 'start', None)
         assert start_program, '%s must have start method' % self

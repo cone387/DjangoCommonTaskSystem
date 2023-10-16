@@ -20,7 +20,7 @@ urlpatterns = [
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
 
-    path('system/scheduler/<slug:action>/', views.SchedulerView.as_view(), name='scheduler-action'),
+    path('system/producer/<slug:action>/', views.ProducerView.as_view(), name='producer-action'),
     path('system/consumer/<slug:action>/', views.ConsumerView.as_view(), name='consumer-action'),
     path('client/<slug:action>/', views.ClientView.as_view(), name='client-action'),
 

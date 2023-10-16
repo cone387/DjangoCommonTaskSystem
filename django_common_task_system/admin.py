@@ -10,7 +10,7 @@ from docker.errors import APIError
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
 from django_common_task_system import client as schedule_client
-from django_common_task_system.schedule.scheduler import scheduler_agent
+from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.schedule import util as schedule_util
 from . import get_task_model, get_schedule_model, get_schedule_log_model
@@ -704,8 +704,8 @@ class OverviewAdmin(admin.ModelAdmin):
             return start_action
 
     @staticmethod
-    def action_scheduler(obj: models.Overview):
-        return OverviewAdmin.action_program('scheduler-action', scheduler_agent)
+    def action_producer(obj: models.Overview):
+        return OverviewAdmin.action_program('producer-action', producer_agent)
 
     @staticmethod
     def action_consumer(obj: models.Overview):
@@ -744,9 +744,9 @@ class OverviewAdmin(admin.ModelAdmin):
             position=1
         )
 
-        scheduler_agent.state.pull()
-        state = scheduler_agent.state
-        scheduler_state = {
+        producer_agent.state.pull()
+        state = producer_agent.state
+        producer_state = {
             "运行ID": state.ident,
             "线程名称": state.name,
             "线程状态": "运行中" if state.is_running else "已停止",
@@ -754,9 +754,9 @@ class OverviewAdmin(admin.ModelAdmin):
             "最近调度时间": state.last_schedule_time,
             "日志文件": state.log_file.replace(os.getcwd(), '')
         }
-        model.objects['scheduler'] = model(
+        model.objects['producer'] = model(
             name="计划调度线程",
-            state=scheduler_state,
+            state=producer_state,
             position=2
         )
 

@@ -18,6 +18,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.utils.algorithm import get_md5
 from functools import cmp_to_key
+from django_common_task_system.program import Program
 import os
 import re
 
@@ -370,15 +371,26 @@ class DockerEngine(ClientEngine):
         self.container_create_time = engine_settings.get('container_create_time')
 
 
-class ProcessEngine(ClientEngine):
-    pass
+# class Machine(models.Model):
+#     name = models.CharField(max_length=100, verbose_name='机器名', primary_key=True)
+#     ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+#     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
+#
+#     manager = CustomManager()
+#
+#     class Meta:
+#         managed = False
+#         verbose_name = verbose_name_plural = '机器管理'
+#
+#     def __str__(self):
+#         return self.name
 
 
-class TaskClient(models.Model):
+class Consumer(models.Model):
     # 两种运行模式: 容器模式，进程模式
-    runner = None
+    program: Program = None
 
-    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    consumer_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
     machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
     machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
@@ -386,7 +398,7 @@ class TaskClient(models.Model):
     subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     engine_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ClientEngineType.choices,
                                    default=ClientEngineType.DOCKER)
-    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
+    program_settings = models.JSONField(verbose_name='引擎设置', default=dict)
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
                                       verbose_name='启动结果', default=TaskClientStatus.RUNNING)
@@ -396,50 +408,38 @@ class TaskClient(models.Model):
 
     objects = CustomManager()
 
-    @property
-    def engine(self):
-        if self.engine_type == ClientEngineType.DOCKER:
-            return DockerEngine(self.engine_settings)
-        elif self.engine_type == ClientEngineType.PROCESS:
-            return ProcessEngine(self.engine_settings)
-        else:
-            raise ValueError("Invalid engine_type: %s" % self.engine_type)
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '客户端管理'
+        verbose_name = verbose_name_plural = '消费端管理'
 
     def __str__(self):
-        return str(self.client_id)
-
-    @cached_property
-    def fp(self):
-        return get_md5("%s" % self.runner.id if self.runner else self.client_id)
+        return str(self.consumer_id)
 
     @cached_property
     def settings_file(self):
         tmp_path = os.path.join(os.getcwd(), "tmp")
         if not os.path.exists(tmp_path):
             os.makedirs(tmp_path)
-        return os.path.join(tmp_path, "settings_%s.py" % self.fp)
+        return os.path.join(tmp_path, "settings_%s.py" % self.consumer_id)
 
     @cached_property
     def log_file(self):
         log_path = os.path.join(os.getcwd(), "logs")
         if not os.path.exists(log_path):
             os.makedirs(log_path)
-        return os.path.join(log_path, "log_%s.log" % self.fp)
+        return os.path.join(log_path, "log_%s.log" % self.consumer_id)
 
     def save(
             self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        if not self.client_id:
-            self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
-        TaskClient.objects[self.client_id] = self
-        if self.runner is None:
+        if not self.consumer_id:
+            self.consumer_id = max([c.consumer_id for c in Consumer.objects.all()]) + 1 if Consumer.objects else 1
+        Consumer.objects[self.consumer_id] = self
+        if self.program is None:
             self.create_time = timezone.now()
             post_save.send(
-                sender=TaskClient,
+                sender=Consumer,
                 instance=self,
                 created=True,
                 update_fields=update_fields,
@@ -448,9 +448,9 @@ class TaskClient(models.Model):
             )
 
     def delete(self, using=None, keep_parents=False):
-        if self.runner is not None:
-            self.runner.stop()
-        TaskClient.objects.pop(self.client_id, None)
+        if self.program is not None:
+            self.program.stop()
+        Consumer.objects.pop(self.consumer_id, None)
 
 
 class ExceptionScheduleManager(CustomManager):
