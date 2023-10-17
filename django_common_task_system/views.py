@@ -22,13 +22,12 @@ from django.http.response import HttpResponse
 from django_common_task_system.schedule import util as schedule_util
 from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
-from django_common_task_system.program import ProgramAction, ProgramAgent
-from .choices import TaskClientStatus, ScheduleStatus
+from django_common_task_system.program import ProgramAction, ProgramAgent, ContainerProgramAction
+from .choices import ConsumeStatus, ScheduleStatus
 from .models import Consumer
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
-from . import consumer
 from .log import PagedLog
 from typing import List, Dict, Union
 import os
@@ -49,8 +48,8 @@ ScheduleSerializer = get_schedule_serializer()
 
 def on_system_shutdown(signum, frame):
     print('system shutdown, signal: %s' % signum)
-    for client in models.TaskClient.objects.all():
-        client.delete()
+    for consumer in models.Consumer.objects.all():
+        consumer.delete()
 
 
 @receiver(post_delete, sender=models.ScheduleQueue)
@@ -95,10 +94,9 @@ def delete_task(sender, instance: Task, **kwargs):
 
 
 @receiver(post_save, sender=models.Consumer)
-def add_client(sender, instance: models.Consumer, created, **kwargs):
-    # thread = Thread(target=schedule_client.start_client, args=(instance,))
-    # thread.start()
-    consumer.consume(instance)
+def add_consumer(sender, instance: models.Consumer, created, **kwargs):
+    from .consumer import consume
+    consume(instance)
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
@@ -314,29 +312,28 @@ class ScheduleTimeParseView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class ClientView(APIView):
+class UserConsumerView(APIView):
 
     def get(self, request: Request, action: str):
-        if action == 'start':
-            client = Consumer.objects.create()
-            return Response({'client_id': client.id})
+        if action == ContainerProgramAction.START:
+            consumer = Consumer.objects.create()
+            return Response(models.ConsumerSerializer(consumer).data)
         if action == 'register':
-            return ClientView.register_client(request)
-        client_id = request.GET.get('client_id', '')
-        if not client_id.isdigit():
-            return Response({'error': 'invalid client_id: %s' % client_id}, status=status.HTTP_400_BAD_REQUEST)
-        client: Consumer = Consumer.objects.get(int(client_id))
-        if client is None:
-            raise NotFound('TaskClient(%s)不存在' % client_id)
-        if action == 'stop':
-            client.delete()
-            return Response({'message': 'stop client(%s) success' % client_id})
-        elif action == 'log':
-            if client.startup_status == TaskClientStatus.RUNNING.value:
-                log = client.runner.read_log()
-            else:
-                log = client.startup_log
-            return HttpResponse(log, content_type='text/plain; charset=utf-8')
+            return UserConsumerView.register_client(request)
+        consumer_id = request.GET.get('consumer_id', '')
+        if not consumer_id.isdigit():
+            return Response({'error': 'invalid consumer_id: %s' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
+        consumer: Consumer = Consumer.objects.get(consumer_id)
+        if consumer is None:
+            raise NotFound('Consumer(%s)不存在' % consumer_id)
+        if action == ContainerProgramAction.STOP:
+            consumer.program.stop()
+            return Response(models.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
+        elif action == ContainerProgramAction.DESTROY:
+            consumer.delete()
+            return Response(models.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
+        elif action == ContainerProgramAction.LOG:
+            return HttpResponse(consumer.program.read_log(), content_type='text/plain; charset=utf-8')
         else:
             return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
                             status=status.HTTP_400_BAD_REQUEST)
@@ -416,7 +413,7 @@ class ProducerView(ProgramViewMixin, APIView):
     agent = producer_agent
 
 
-class ConsumerView(ProgramViewMixin, APIView):
+class SystemConsumerView(ProgramViewMixin, APIView):
     agent = consumer_agent
 
 

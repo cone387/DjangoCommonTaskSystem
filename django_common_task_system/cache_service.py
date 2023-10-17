@@ -167,7 +167,7 @@ def _qpop(qname):
         return None
 
 
-async def _bqpop(qname, timeout: int = 0):
+async def _qbpop(qname, timeout: int = 0):
     queue = get_or_create_queue(qname)
     if timeout <= 0:
         return await queue.get()
@@ -279,11 +279,23 @@ def _hgetall(name: str) -> Union[Dict, None]:
     return item
 
 
+def _hdel(name, key):
+    hmap = _cache_mapping.get(name)
+    if hmap is None:
+        return None
+    if not isinstance(hmap, dict):
+        raise Exception("key %s is not a map, use get instead" % name)
+    return hmap.pop(key, None)
+
+
 _available_commands = {
     'list': _list,
     'pop': _pop,
     'bpop': _bpop,
     'push': _push,
+    'qpop': _qpop,
+    'qbpop': _qbpop,
+    'qpush': _qpush,
     'delete': _delete,
     'llen': _llen,
     'set': _set,
@@ -292,6 +304,7 @@ _available_commands = {
     'hset': _hset,
     'hget': _hget,
     'hgetall': _hgetall,
+    'hdel': _hdel,
     # 'LINDEX': lambda: HttpResponse(''),
 }
 
@@ -506,14 +519,23 @@ class CacheAgent:
     def delete(self, key):
         return self.execute('delete', key)
 
+    def qpush(self, key, *value):
+        return self.execute('qpush', *value, qname=key)
+
+    def qpop(self, key):
+        return self.execute('qpop', qname=key)
+
+    def qbpop(self, key, timeout=0):
+        return self.execute('qbpop', qname=key, timeout=timeout)
+
     def push(self, key, *value):
-        return self.execute('push', *value, qname=key)
+        return self.execute('push', *value, name=key)
 
     def pop(self, key):
-        return self.execute('pop', qname=key)
+        return self.execute('pop', name=key)
 
     def bpop(self, key, timeout=0):
-        return self.execute('bpop', qname=key, timeout=timeout)
+        return self.execute('bpop', name=key, timeout=timeout)
 
     def list(self):
         return self.execute('list')
@@ -534,6 +556,9 @@ class CacheAgent:
         if item is not None:
             item = json.loads(item)
         return item
+
+    def hdel(self, name, key):
+        return self.execute('hdel', name, key)
 
     def ping(self):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

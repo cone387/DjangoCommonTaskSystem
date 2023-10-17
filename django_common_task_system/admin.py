@@ -9,7 +9,7 @@ from datetime import datetime
 from docker.errors import APIError
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
-from django_common_task_system import client as schedule_client
+from django_common_task_system import consumer
 from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.schedule import util as schedule_util
@@ -18,7 +18,7 @@ from . import forms
 from . import models
 from .builtins import builtins
 from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
-    ScheduleStatus, ExecuteStatus
+    ScheduleStatus, ExecuteStatus, ConsumeStatus, ContainerStatus
 
 UserModel = models.UserModel
 Task: models.Task = get_task_model()
@@ -377,17 +377,16 @@ class ExceptionReportAdmin(admin.ModelAdmin):
         return [field.name for field in self.model._meta.fields]
 
 
-class TaskClientAdmin(admin.ModelAdmin):
-    list_display = ('client_id', 'group', 'machine', 'runner_id', 'runner_attr',
-                    'admin_subscription_url',
-                    'startup_status',
-                    'runner_status',
+class ConsumerAdmin(admin.ModelAdmin):
+    list_display = ('consumer_id', 'group', 'machine', 'program_state',
+                    'admin_consume_url',
+                    'consume_status', 'program_status',
                     'action', 'create_time')
-    form = forms.TaskClientForm
+    form = forms.ConsumerForm
     fieldsets = (
         (None, {
             'fields': (
-                ('machine', 'engine_type')
+                ('machine', 'program_type')
             ),
         }),
         ("容器配置", {
@@ -406,15 +405,15 @@ class TaskClientAdmin(admin.ModelAdmin):
         },),
         ("订阅配置", {
             'fields': (
-                'subscription_url',
-                ('subscription_scheme', 'subscription_host', 'subscription_port'),
-                'custom_subscription_url',
-                'subscription_kwargs',
+                'consume_url',
+                ('consume_scheme', 'consume_host', 'consume_port'),
+                'custom_consume_url',
+                'consume_kwargs',
             )},),
         ("高级配置", {
             'fields': (
-                'settings',
-                'env',
+                'setting',
+                'program_env',
             ),
             "classes": ("collapse", )
         }),
@@ -428,7 +427,7 @@ class TaskClientAdmin(admin.ModelAdmin):
     # list_filter = ('runner_status',)
     readonly_fields = ('create_time', )
 
-    def machine(self, obj: models.TaskClient):
+    def machine(self, obj: models.Consumer):
         attrs = [
             '<b>IP</b>: %s' % obj.machine_ip,
             '<b>主机名</b>: %s' % obj.machine_name,
@@ -436,43 +435,54 @@ class TaskClientAdmin(admin.ModelAdmin):
         return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
     machine.short_description = '机器'
 
-    def runner_id(self, obj):
-        return getattr(obj.runner, 'id', None)
-    runner_id.short_description = 'RunnerID'
+    def program_status(self, obj: models.Consumer):
+        return obj.program is not None and obj.program.is_running
+    program_status.short_description = '程序状态'
+    program_status.boolean = True
 
-    def runner_attr(self, obj):
-        if obj.runner is None:
+    def program_state(self, obj):
+        if obj.program is None:
             return '-'
+        program = models.ConsumerSerializer(obj).data['program']
+        container = program.get('container', {})
         # 分行展示
-        attrs = []
-        for k, v in obj.runner.attrs.items():
+        attrs = [
+            '<b>程序</b>: %s' % program['program_class'],
+        ]
+        for k, v in container.items():
             # k粗体 加大行间距
             attrs.append('<b>%s</b>: %s' % (k, v))
         return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
-    runner_attr.short_description = '属性'
+    program_state.short_description = '程序状态'
 
-    def runner_status(self, obj):
-        return getattr(obj.runner, 'status', None)
-    runner_status.short_description = 'Runner状态'
-
-    def admin_subscription_url(self, obj):
-        url = urlparse(obj.subscription_url)
+    def admin_consume_url(self, obj: models.Consumer):
+        url = urlparse(obj.consume_url)
         return format_html(
             '<a href="%s" target="_blank">%s</a>' % (
-                obj.subscription_url, url.path
+                obj.consume_url, url.path
             )
         )
-    admin_subscription_url.short_description = '订阅地址'
+    admin_consume_url.short_description = '消费地址'
 
-    def action(self, obj):
-        if obj.runner is None:
-            return '-'
-        stop_url = reverse('client-action', args=('stop',)) + '?client_id=%s' % obj.pk
-        log_url = reverse('client-action', args=('log',)) + '?client_id=%s' % obj.pk
+    def action(self, obj: models.Consumer):
+        start_url = reverse('user-consumer-action', args=('start',)) + '?consumer_id=%s' % obj.pk
+        stop_url = reverse('user-consumer-action', args=('stop',)) + '?consumer_id=%s' % obj.pk
+        log_url = reverse('user-consumer-action', args=('log',)) + '?consumer_id=%s' % obj.pk
+        destroy_url = reverse('user-consumer-action', args=('destroy',)) + '?consumer_id=%s' % obj.pk
+        start_action = '<a href="%s" target="_blank">启动</a>' % start_url
         stop_action = '<a href="%s" target="_blank">停止</a>' % stop_url
+        destroy_action = '<a href="%s" target="_blank">销毁</a>' % destroy_url
         log_action = '<a href="%s" target="_blank">日志</a>' % log_url
+        if obj.program is None:
+            actions = [start_action, log_action, destroy_action]
+        elif obj.program.is_running:
+            actions = [stop_action, log_action, destroy_action]
+        elif obj.program.container is not None and obj.program.container.status == ContainerStatus.PAUSED:
+            actions = [start_action, log_action, destroy_action]
+        else:
+            actions = [log_action, destroy_action]
         return format_html(
-            '<span style="line-height: 2">%s<br>%s</span>' % (stop_action, log_action)
+            '<span style="line-height: 2">%s</span>' % "<br>".join(actions)
         )
     action.short_description = '操作'
 
@@ -480,7 +490,7 @@ class TaskClientAdmin(admin.ModelAdmin):
 
     def load_local_containers(self, request):
         if not self.containers_loaded:
-            TaskClientAdmin.containers_loaded = True
+            ConsumerAdmin.containers_loaded = True
             try:
                 client = docker.from_env()
                 containers = client.containers.list(all=True, filters={
@@ -491,21 +501,11 @@ class TaskClientAdmin(admin.ModelAdmin):
                 self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
             else:
                 for container in containers:
-                    kwargs = {x.split('=')[0].strip('-'): x.split('=')[1] for x in container.attrs['Args'] if '=' in x}
-                    subscription_url = kwargs.pop('subscription-url', None)
-                    client = models.TaskClient(
-                        subscription_url=subscription_url,
-                        subscription_kwargs=kwargs,
-                    )
-                    runner = schedule_client.ClientRunner(client)
-                    runner.runner = container
-                    client.create_time = datetime.strptime(container.attrs['Created'].split('.')[0],
-                                                           "%Y-%m-%dT%H:%M:%S")
-                    client.save()
+                    consumer.ConsumerProgram.load_from_container(container)
 
     def get_queryset(self, request):
         self.load_local_containers(request)
-        return models.TaskClient.objects.all()
+        return models.Consumer.objects.all()
 
     def has_change_permission(self, request, obj=None):
         return False
@@ -689,7 +689,7 @@ class OverviewAdmin(admin.ModelAdmin):
     @staticmethod
     def action_client(obj: models.Overview):
         return '<a href="/admin/django_common_task_system/%s/" target="_blank">管理</a>' % \
-               models.TaskClient._meta.model_name
+               models.Consumer._meta.model_name
 
     @staticmethod
     def action_program(action_url, agent):
@@ -709,7 +709,7 @@ class OverviewAdmin(admin.ModelAdmin):
 
     @staticmethod
     def action_consumer(obj: models.Overview):
-        return OverviewAdmin.action_program('consumer-action', consumer_agent)
+        return OverviewAdmin.action_program('system-consumer-action', consumer_agent)
 
     @staticmethod
     def action_enabled_schedule(obj: models.Overview):
@@ -781,8 +781,8 @@ class OverviewAdmin(admin.ModelAdmin):
         )
         groups = set()
         machines = set()
-        for client in models.TaskClient.objects.all():
-            client: models.TaskClient
+        for client in models.Consumer.objects.all():
+            client: models.Consumer
             machines.add(client.machine_ip)
             groups.add(client.group)
 
@@ -791,7 +791,7 @@ class OverviewAdmin(admin.ModelAdmin):
             state={
                 "机器数量": len(machines),
                 "分组数量": len(groups),
-                "客户端数量": models.TaskClient.objects.count()
+                "客户端数量": models.Consumer.objects.count()
             },
             position=5
         )
@@ -811,7 +811,7 @@ admin.site.register(models.ScheduleQueuePermission, ScheduleQueuePermissionAdmin
 admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
 admin.site.register(models.RetrySchedule, RetryScheduleAdmin)
-admin.site.register(models.TaskClient, TaskClientAdmin)
+admin.site.register(models.Consumer, ConsumerAdmin)
 
 
 admin.site.site_header = '任务管理系统'

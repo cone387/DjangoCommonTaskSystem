@@ -67,12 +67,12 @@ class PermissionType(TextChoices):
     IP_WHITE_LIST = 'I', 'IP白名单'
 
 
-class ClientEngineType(TextChoices):
+class ProgramType(TextChoices):
     DOCKER = 'Docker'
     PROCESS = 'Process'
 
 
-class TaskClientStatus(TextChoices):
+class ConsumeStatus(TextChoices):
     # start status
     INIT = 'Init', '初始化'
     PULLING = 'Pulling', '拉取镜像中'

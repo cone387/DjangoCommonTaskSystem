@@ -16,7 +16,7 @@ from django.urls import reverse
 from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
 from django_common_task_system.utils.cache import ttl_cache
-from .choices import ClientEngineType
+from .choices import ProgramType
 from . import models
 from .builtins import builtins
 from . import get_schedule_model, get_task_model
@@ -342,7 +342,7 @@ class ReadOnlyWidget(forms.TextInput):
 
 SETTINGS_TEMPLATE = """
 # DISPATCHER = "task_system_client.task_center.dispatch.ParentAndOptionalNameDispatcher"
-# SUBSCRIPTION = "task_system_client.task_center.subscription.HttpSubscription"
+# consume = "task_system_client.task_center.consume.Httpconsume"
 # EXECUTOR = "task_system_client.executor.base.ParentNameExecutor"
 # SUBSCRIBER = "task_system_client.subscriber.BaseSubscriber"
 # 异常处理
@@ -354,18 +354,18 @@ SETTINGS_TEMPLATE = """
 """
 
 
-class TaskClientForm(forms.ModelForm):
+class ConsumerForm(forms.ModelForm):
     machine = forms.ChoiceField(label='机器')
-    subscription_url = forms.ChoiceField(label='订阅地址', required=False)
-    subscription_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
-    subscription_host = forms.ChoiceField(label='订阅Host')
-    subscription_port = forms.IntegerField(label='订阅Port', initial=80, min_value=1, max_value=65535)
-    custom_subscription_url = forms.CharField(
+    consume_url = forms.ChoiceField(label='订阅地址', required=False)
+    consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
+    consume_host = forms.ChoiceField(label='订阅Host')
+    consume_port = forms.IntegerField(label='订阅Port', initial=80, min_value=1, max_value=65535)
+    custom_consume_url = forms.CharField(
         max_length=300, label='自定义订阅地址', widget=forms.TextInput(
-            attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/schedule/subscription/'}),
+            attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/schedule/consume/'}),
         required=False, help_text="如果选择了此项，将使用此地址作为订阅地址，忽略选择的系统订阅地址"
     )
-    subscription_kwargs = forms.CharField(max_length=500, label='订阅参数', widget=forms.Textarea(
+    consume_kwargs = forms.CharField(max_length=500, label='订阅参数', widget=forms.Textarea(
         attrs={'rows': 1, 'style': 'width: 60%;',
                'placeholder': '{"queue": "test", "command": "select * from table limit 1"}'}
     ), required=False)
@@ -377,13 +377,14 @@ class TaskClientForm(forms.ModelForm):
     container_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
         attrs={'style': 'width: 60%;', 'placeholder': 'common-task-system-client'}
     ), required=False)
-    settings = forms.CharField(
+    setting = forms.CharField(
         label='配置',
         max_length=5000,
         initial=SETTINGS_TEMPLATE,
+        required=False,
         widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": len(SETTINGS_TEMPLATE.split('\n'))}),
     )
-    env = forms.CharField(
+    program_env = forms.CharField(
         label='环境变量',
         max_length=500,
         initial='DJANGO_SETTINGS_MODULE=%s' % os.environ.get('DJANGO_SETTINGS_MODULE'),
@@ -391,13 +392,13 @@ class TaskClientForm(forms.ModelForm):
     )
 
     def __init__(self, *args, **kwargs):
-        super(TaskClientForm, self).__init__(*args, **kwargs)
-        subscription_url_choices = []
+        super(ConsumerForm, self).__init__(*args, **kwargs)
+        consume_url_choices = []
         queryset = models.ScheduleQueue.objects.filter(status=True)
         for obj in queryset:
             path = reverse('schedule-get', kwargs={'code': obj.code})
-            subscription_url_choices.append((path, obj.name))
-        self.fields['subscription_url'].choices = subscription_url_choices
+            consume_url_choices.append((path, obj.name))
+        self.fields['consume_url'].choices = consume_url_choices
         intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
         internet_ip = self.get_internet_ip()
         ip_choices = (
@@ -405,21 +406,21 @@ class TaskClientForm(forms.ModelForm):
             (internet_ip, "%s(外网)" % internet_ip),
             ('127.0.0.1', '127.0.0.1')
         )
-        self.fields['subscription_host'].choices = ip_choices
+        self.fields['consume_host'].choices = ip_choices
         self.fields['machine'].choices = self.get_machine_choices()
-        self.initial['subscription_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
+        self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
     def get_machine_choices():
         machines = {}
-        for o in models.TaskClient.objects.all():
+        for o in models.Consumer.objects.all():
             machines.setdefault(o.machine_ip, []).append(o)
         choices = []
         for ip, clients in machines.items():
             choices.append(("%s-%s" % (ip, clients[0].machine_name),
                             "%s(%s)%s clients running" % (ip, clients[0].machine_name, len(clients))))
         intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
-        internet_ip = TaskClientForm.get_internet_ip()
+        internet_ip = ConsumerForm.get_internet_ip()
         for ip in (intranet_ip, internet_ip, '127.0.0.1'):
             if ip in machines:
                 break
@@ -436,7 +437,7 @@ class TaskClientForm(forms.ModelForm):
             return "获取失败: %s" % str(e)[:50]
 
     @staticmethod
-    def validate_settings(setting_str, setting_dict):
+    def validate_setting(setting_str, setting_dict):
         try:
             exec(setting_str, None, setting_dict)
         except Exception as e:
@@ -446,33 +447,33 @@ class TaskClientForm(forms.ModelForm):
         pass
 
     def clean(self):
-        cleaned_data = super(TaskClientForm, self).clean()
+        cleaned_data = super(ConsumerForm, self).clean()
         if self.errors:
             return cleaned_data
-        client: models.TaskClient = self.instance
-        client.machine_ip, client.machine_name = cleaned_data['machine'].split('-', 1)
-        client.subscription_url = cleaned_data.get('custom_subscription_url') or urljoin(
-            "%s://%s:%s" % (cleaned_data.get('subscription_scheme'),
-                            cleaned_data.get('subscription_host'),
-                            cleaned_data.get('subscription_port')),
-            cleaned_data.get('subscription_url'))
-        if client.subscription_url.startswith('redis'):
-            if not client.subscription_kwargs.get('queue'):
-                raise forms.ValidationError('queue is required for redis subscription')
-        if client.subscription_url.startswith('mysql'):
-            if not client.subscription_kwargs.get('command'):
-                raise forms.ValidationError('command is required for mysql subscription')
-        client.engine_type = cleaned_data['engine_type']
-        if client.engine_type == ClientEngineType.DOCKER:
-            client.engine_settings = {
+        consumer: models.Consumer = self.instance
+        consumer.machine_ip, consumer.machine_name = cleaned_data['machine'].split('-', 1)
+        consumer.consume_url = cleaned_data.get('custom_consume_url') or urljoin(
+            "%s://%s:%s" % (cleaned_data.get('consume_scheme'),
+                            cleaned_data.get('consume_host'),
+                            cleaned_data.get('consume_port')),
+            cleaned_data.get('consume_url'))
+        if consumer.consume_url.startswith('redis'):
+            if not consumer.consume_kwargs.get('queue'):
+                raise forms.ValidationError('queue is required for redis consume')
+        if consumer.consume_url.startswith('mysql'):
+            if not consumer.consume_kwargs.get('command'):
+                raise forms.ValidationError('command is required for mysql consume')
+        consumer.program_type = cleaned_data['program_type']
+        if consumer.program_type == ProgramType.DOCKER:
+            consumer.program_setting = {
                 'image': cleaned_data['container_image'],
-                'container_name': cleaned_data['container_name'],
-                'container_id': cleaned_data['container_id'],
+                'name': cleaned_data['container_name'],
+                'id': cleaned_data['container_id'],
             }
-        self.validate_settings(cleaned_data['settings'], client.settings)
+        self.validate_setting(cleaned_data['setting'], consumer.setting)
         return cleaned_data
 
     class Meta:
-        model = models.TaskClient
+        model = models.Consumer
         fields = '__all__'
 

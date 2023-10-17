@@ -20,16 +20,16 @@ class SocketQueue:
 
     def get(self, block=True, timeout=0):
         if block:
-            item = self.agent.bpop(self.name, timeout=timeout)
+            item = self.agent.qbpop(self.name, timeout=timeout)
             return json.loads(item)
         return self.get_nowait()
 
     def get_nowait(self):
-        item = self.agent.pop(self.name)
+        item = self.agent.qpop(self.name)
         if item is None:
             raise Empty
         return json.loads(item)
 
     def put(self, item: dict):
         item = json.dumps(item)
-        self.agent.push(self.name, item)
+        self.agent.qpush(self.name, item)

@@ -1,21 +1,21 @@
 $(document).ready(function () {
-  const $engineType = $('#id_engine_type');
+  const $programType = $('#id_program_type');
   const $dockerConfig = $('.docker-config');
   const $processConfig = $('.process-config');
 
   function show_hide_fields(){
-    const engineType = $engineType.find("option:selected").text();
-    console.log("engineType is ", engineType);
-    if(engineType === "Docker") {
+    const programType = $programType.find("option:selected").text();
+    console.log("programType is ", programType);
+    if(programType === "Docker") {
         $dockerConfig.show();
         $processConfig.hide();
-    }else if(engineType === "Process"){
+    }else if(programType === "Process"){
         $dockerConfig.hide();
         $processConfig.show();
     }else{
-        console.log("engineType is ", engineType);
+        console.log("programType is ", programType);
     }
   }
   show_hide_fields();
-  $engineType.on('change', show_hide_fields);
+  $programType.on('change', show_hide_fields);
 });
