@@ -2,8 +2,10 @@ import threading
 import logging
 import enum
 import os
-from typing import Callable
+from typing import Callable, Optional
+from docker.models.containers import Container
 from django_common_task_system.cache_service import cache_agent
+from django_common_task_system.choices import ContainerStatus
 
 
 class ProgramAction(str, enum.Enum):
@@ -11,6 +13,14 @@ class ProgramAction(str, enum.Enum):
     STOP = 'stop'
     RESTART = 'restart'
     LOG = 'log'
+
+
+class ContainerProgramAction(str, enum.Enum):
+    START = 'start'
+    STOP = 'stop'
+    RESTART = 'restart'
+    LOG = 'log'
+    DESTROY = 'destroy'
 
 
 class ProgramState(dict):
@@ -70,9 +80,14 @@ class Program:
             **kwargs
         )
 
+    def run(self) -> None:
+        raise NotImplementedError
+
     def start_if_not_started(self) -> str:
         start_program: Callable[[], None] = getattr(self, 'start', None)
-        assert start_program, '%s must have start method' % self
+        if start_program is None:
+            start_program = getattr(self, 'run', None)
+        assert start_program, 'start or run method must be implemented'
         if self.is_running:
             error = '%s already started, pid: %s' % (self, self.program_id)
         else:
@@ -87,8 +102,39 @@ class Program:
     def stop(self):
         self._event.clear()
 
+    def read_log(self, page=0, page_size=10):
+        raise NotImplementedError
+
     def __str__(self):
         return "Program(%s)" % self.__class__.__name__
+
+
+class ContainerProgram(Program):
+    def __init__(self, container=None):
+        self.container: Optional[Container] = container
+        super().__init__(name=getattr(container, 'name', None))
+
+    def run(self) -> None:
+        raise NotImplementedError
+
+    def read_log(self, page=0, page_size=1000):
+        if self.container:
+            return self.container.logs(tail=page_size)
+
+    # def start(self):
+    #     self.container.start()
+    #
+    def stop(self):
+        assert self.container, 'container must be set'
+        self.container.stop()
+        self.container.remove()
+
+    def restart(self):
+        self.container.restart()
+
+    @property
+    def is_running(self):
+        return self.container.status == ContainerStatus.RUNNING
 
 
 class ProgramAgent:

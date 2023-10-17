@@ -1,9 +1,11 @@
+import json
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
-    ScheduleCallbackEvent, ScheduleQueueModule, TaskClientStatus, ClientEngineType,
+    ScheduleCallbackEvent, ScheduleQueueModule, ConsumeStatus, ProgramType,
     PermissionType, ExecuteStatus, ScheduleExceptionReason
 )
 from django_common_objects.models import CommonTag, CommonCategory
@@ -16,9 +18,12 @@ from django_common_task_system.schedule import util as schedule_util
 from django.db.models.signals import post_save
 from django.utils import timezone
 from django.utils.functional import cached_property
-from django_common_task_system.utils.algorithm import get_md5
+from django_common_task_system.cache_service import cache_agent
 from functools import cmp_to_key
+from django_common_task_system.program import ContainerProgram
+from rest_framework import serializers
 import os
+import time
 import re
 
 
@@ -343,103 +348,114 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
-class ClientEngine:
-    def __init__(self, engine_settings: dict):
-        self.engine_settings = engine_settings
+class ConsumerManager(CustomManager):
+    cache_key = 'consumers'
 
-    def __setattr__(self, key, value):
-        if key == 'engine_settings':
-            super().__setattr__(key, value)
-            return
-        o = self.engine_settings.get(key)
-        if o is not None and o != value:
-            self.engine_settings[key] = value
-        super().__setattr__(key, value)
+    def all(self):
+        from .consumer import ConsumerProgram
+        consumers = []
+        consumer_mapping = cache_agent.hgetall(self.cache_key)
+        if consumer_mapping:
+            for k, v in consumer_mapping.items():
+                consumers.append(ConsumerProgram.load_consumer_from_cache(v))
+        return QuerySet(consumers, Consumer)
+
+    def get(self, pk, default=None):
+        string = cache_agent.hget(self.cache_key, pk)
+        if string:
+            from .consumer import ConsumerProgram
+            return ConsumerProgram.load_consumer_from_cache(json.loads(string))
+        return default
+
+    def add(self, consumer):
+        cache_agent.hset(self.cache_key, mapping={
+            consumer.consumer_id: ConsumerSerializer(consumer).data,
+        })
+
+    def update_or_create(self, consumer_id, **kwargs):
+        super(ConsumerManager, self).update_or_create()
+        consumer = self.get(consumer_id)
+        if consumer:
+            for k, v in kwargs.items():
+                setattr(consumer, k, v)
+            consumer.save()
+
+    def delete(self, consumer: 'Consumer'):
+        if consumer.program is not None:
+            consumer.program.stop()
+        cache_agent.hdel(self.cache_key, consumer.consumer_id)
 
 
-class DockerEngine(ClientEngine):
-    def __init__(self, engine_settings: dict):
-        super().__init__(engine_settings)
-        self.container_id = engine_settings.get('container_id')
-        self.container_name = engine_settings.get(
-            'container_name') or 'common-task-system-client-%s' % datetime.now().strftime("%Y%m%d%H%M%S")
-        self.image = engine_settings.get('image') or 'cone387/common-task-system-client:latest'
-        self.container_ip = engine_settings.get('container_ip')
-        self.container_port = engine_settings.get('container_port')
-        self.container_status = engine_settings.get('container_status')
-        self.container_create_time = engine_settings.get('container_create_time')
+# class Machine(models.Model):
+#     name = models.CharField(max_length=100, verbose_name='机器名', primary_key=True)
+#     ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+#     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
+#
+#     manager = CustomManager()
+#
+#     class Meta:
+#         managed = False
+#         verbose_name = verbose_name_plural = '机器管理'
+#
+#     def __str__(self):
+#         return self.name
 
 
-class ProcessEngine(ClientEngine):
-    pass
-
-
-class TaskClient(models.Model):
+class Consumer(models.Model):
     # 两种运行模式: 容器模式，进程模式
-    runner = None
+    program: ContainerProgram = None
 
-    client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
+    consumer_id = models.IntegerField(verbose_name='客户端ID', primary_key=True)
     machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
     machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
-    subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
-    subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-    engine_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ClientEngineType.choices,
-                                   default=ClientEngineType.DOCKER)
-    engine_settings = models.JSONField(verbose_name='引擎设置', default=dict)
-    env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-    startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
-                                      verbose_name='启动结果', default=TaskClientStatus.RUNNING)
+    consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
+    consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
+    program_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ProgramType.choices, 
+                                    default=ProgramType.DOCKER)
+    program_setting = models.JSONField(verbose_name='引擎设置', default=dict)
+    program_env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
+    consume_status = models.CharField(max_length=500, choices=ConsumeStatus.choices, 
+                                      verbose_name='启动结果', default=ConsumeStatus.RUNNING)
     startup_log = models.CharField(max_length=2000, null=True, blank=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-    settings = models.JSONField(verbose_name='客户端设置', default=dict)
+    setting = models.JSONField(verbose_name='消费端设置', default=dict)
 
-    objects = CustomManager()
-
-    @property
-    def engine(self):
-        if self.engine_type == ClientEngineType.DOCKER:
-            return DockerEngine(self.engine_settings)
-        elif self.engine_type == ClientEngineType.PROCESS:
-            return ProcessEngine(self.engine_settings)
-        else:
-            raise ValueError("Invalid engine_type: %s" % self.engine_type)
+    objects = ConsumerManager()
 
     class Meta:
         managed = False
-        verbose_name = verbose_name_plural = '客户端管理'
+        verbose_name = verbose_name_plural = '消费端管理'
 
     def __str__(self):
-        return str(self.client_id)
-
-    @cached_property
-    def fp(self):
-        return get_md5("%s" % self.runner.id if self.runner else self.client_id)
+        return str(self.consumer_id)
 
     @cached_property
     def settings_file(self):
         tmp_path = os.path.join(os.getcwd(), "tmp")
         if not os.path.exists(tmp_path):
             os.makedirs(tmp_path)
-        return os.path.join(tmp_path, "settings_%s.py" % self.fp)
+        return os.path.join(tmp_path, "settings_%s.py" % self.consumer_id)
 
     @cached_property
     def log_file(self):
         log_path = os.path.join(os.getcwd(), "logs")
         if not os.path.exists(log_path):
             os.makedirs(log_path)
-        return os.path.join(log_path, "log_%s.log" % self.fp)
+        return os.path.join(log_path, "log_%s.log" % self.consumer_id)
 
     def save(
             self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        if not self.client_id:
-            self.client_id = max([c.client_id for c in TaskClient.objects.all()]) + 1 if TaskClient.objects else 1
-        TaskClient.objects[self.client_id] = self
-        if self.runner is None:
+        if not self.consumer_id:
+            # 使用毫秒级时间戳作为consumer_id
+            self.consumer_id = int(time.time() * 1000)
+        Consumer.objects.add(self)
+        # consumer不可更新，只能创建和删除
+        if self.program is None:
             self.create_time = timezone.now()
             post_save.send(
-                sender=TaskClient,
+                sender=Consumer,
                 instance=self,
                 created=True,
                 update_fields=update_fields,
@@ -448,9 +464,10 @@ class TaskClient(models.Model):
             )
 
     def delete(self, using=None, keep_parents=False):
-        if self.runner is not None:
-            self.runner.stop()
-        TaskClient.objects.pop(self.client_id, None)
+        Consumer.objects.delete(self)
+
+    def update(self):
+        Consumer.objects.update(self)
 
 
 class ExceptionScheduleManager(CustomManager):
@@ -592,3 +609,32 @@ class Overview(models.Model):
         managed = False
         verbose_name = verbose_name_plural = '系统总览'
         ordering = ('position',)
+
+
+class ConsumerSerializer(serializers.ModelSerializer):
+    program = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_program(obj: Consumer):
+        if obj.program:
+            program = obj.program
+            if program and program.container:
+                container_data = {
+                    "short_id": program.container.short_id,
+                    "image": program.container.image.tags[0] if program.container.image.tags else "",
+                    "name": program.container.name,
+                    "ip": program.container.attrs.get('NetworkSettings', {}).get('IPAddress', ''),
+                    "port": ';'.join(program.container.attrs.get('NetworkSettings', {}).get('Ports', {}).values()),
+                    "status": program.container.status,
+                }
+            else:
+                container_data = {}
+            return {
+                "container": container_data,
+                "program_class": program.__class__.__module__ + '.' + program.__class__.__name__,
+            }
+        return None
+
+    class Meta:
+        fields = '__all__'
+        model = Consumer

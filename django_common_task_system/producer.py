@@ -5,7 +5,7 @@ from django_common_task_system import get_schedule_model, get_schedule_serialize
 from django_common_task_system.models import AbstractSchedule
 from django_common_task_system.utils.logger import add_file_handler
 from django_common_task_system.program import Program, ProgramAgent, ProgramState
-from .config import ScheduleConfig
+from django_common_task_system.schedule.config import ScheduleConfig
 from datetime import datetime
 import time
 import threading
@@ -15,24 +15,24 @@ Schedule: AbstractSchedule = get_schedule_model()
 ScheduleSerializer = get_schedule_serializer()
 
 
-class SchedulerState(ProgramState):
+class ProducerState(ProgramState):
     def __init__(self, key):
-        super(SchedulerState, self).__init__(key)
+        super(ProducerState, self).__init__(key)
         self.scheduled_count = 0
         self.last_schedule_time = ''
         self.log_file = ''
 
 
-class Scheduler(Program):
-    state_class = SchedulerState
-    state_key = 'scheduler'
+class Producer(Program):
+    state_class = ProducerState
+    state_key = 'producer'
 
     def __init__(self):
-        super(Scheduler, self).__init__(name='Scheduler')
+        super(Producer, self).__init__(name='Producer')
         self.log_file = add_file_handler(self.logger)
 
     def init_state(self, **kwargs):
-        super(Scheduler, self).init_state(
+        super(Producer, self).init_state(
             log_file=self.log_file,
         )
 
@@ -40,7 +40,7 @@ class Scheduler(Program):
         state = self.state
         count = 0
         now = datetime.now()
-        qsize = getattr(settings, 'SCHEDULE_QUEUE_MAX_SIZE', 1000)
+        qsize = getattr(settings, 'PRODUCE_QUEUE_MAX_SIZE', 1000)
         max_queue_size = qsize * 2
         schedule_result = {}
         for producer in builtins.schedule_producers.values():
@@ -100,7 +100,7 @@ class Scheduler(Program):
             time.sleep(SCHEDULE_INTERVAL)
 
 
-class SchedulerThread(Scheduler, threading.Thread):
+class ProducerThread(Producer, threading.Thread):
     def __init__(self):
         super().__init__()
         threading.Thread.__init__(self, daemon=True, name=self.program_name)
@@ -110,10 +110,10 @@ class SchedulerThread(Scheduler, threading.Thread):
         return self.ident
 
     def stop(self):
-        super(SchedulerThread, self).stop()
+        super(ProducerThread, self).stop()
         while self.is_alive():
             time.sleep(0.5)
         return ''
 
 
-scheduler_agent = ProgramAgent(program_class=SchedulerThread)
+producer_agent = ProgramAgent(program_class=ProducerThread)
