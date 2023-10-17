@@ -378,7 +378,8 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 class ConsumerAdmin(admin.ModelAdmin):
-    list_display = ('consumer_id', 'group', 'machine', 'program_state',
+    list_display = ('consumer_id', 'machine',
+                    'program_state',
                     'admin_consume_url',
                     'consume_status', 'program_status',
                     'action', 'create_time')
@@ -779,18 +780,18 @@ class OverviewAdmin(admin.ModelAdmin):
             },
             position=4
         )
-        groups = set()
-        machines = set()
-        for client in models.Consumer.objects.all():
-            client: models.Consumer
-            machines.add(client.machine_ip)
-            groups.add(client.group)
+        # groups = set()
+        # machines = models.Machine.objects.all().count()
+        # for client in models.Consumer.objects.all():
+        #     client: models.Consumer
+        #     machines.add(client.machine_ip)
+        #     groups.add(client.group)
 
         model.objects['client'] = model(
             name="客户端数量",
             state={
-                "机器数量": len(machines),
-                "分组数量": len(groups),
+                "机器数量": models.Machine.objects.all().count(),
+                # "分组数量": len(groups),
                 "客户端数量": models.Consumer.objects.count()
             },
             position=5

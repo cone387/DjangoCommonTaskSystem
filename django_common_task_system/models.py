@@ -258,10 +258,17 @@ class QuerySet(list):
         order_by = []
         select_related = False
 
+    def using(self, alias):
+        return self
+
+    def all(self):
+        return self
+
     def __init__(self, seq, model):
         super().__init__(seq)
         self.query = self.Query
         self.model = model
+        self._prefetch_related_lookups = True
         self.verbose_name = model._meta.verbose_name
         self.verbose_name_plural = model._meta.verbose_name_plural
 
@@ -386,29 +393,37 @@ class ConsumerManager(CustomManager):
         cache_agent.hdel(self.cache_key, consumer.consumer_id)
 
 
-# class Machine(models.Model):
-#     name = models.CharField(max_length=100, verbose_name='机器名', primary_key=True)
-#     ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
-#     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
-#
-#     manager = CustomManager()
-#
-#     class Meta:
-#         managed = False
-#         verbose_name = verbose_name_plural = '机器管理'
-#
-#     def __str__(self):
-#         return self.name
+class MachineManager(CustomManager):
+
+    def all(self):
+        return QuerySet([
+            Machine(name='本机', ip='127.0.0.1', group='默认'),
+        ], Machine)
+
+
+class Machine(models.Model):
+    name = models.CharField(max_length=100, verbose_name='机器名', primary_key=True)
+    ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+    group = models.CharField(max_length=100, verbose_name='分组', default='默认')
+
+    objects = MachineManager()
+
+    class Meta:
+        managed = False
+        verbose_name = verbose_name_plural = '机器管理'
+
+    def __str__(self):
+        return "%s(%s)" % (self.name, self.ip)
 
 
 class Consumer(models.Model):
     # 两种运行模式: 容器模式，进程模式
     program: ContainerProgram = None
-
+    machine = models.ForeignKey(Machine, on_delete=models.DO_NOTHING, db_constraint=False, verbose_name='机器')
     consumer_id = models.IntegerField(verbose_name='客户端ID', primary_key=True)
-    machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
-    machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
-    group = models.CharField(max_length=100, verbose_name='分组', default='默认')
+    # machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
+    # machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+    # group = models.CharField(max_length=100, verbose_name='分组', default='默认')
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
     consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     program_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ProgramType.choices, 
@@ -611,8 +626,15 @@ class Overview(models.Model):
         ordering = ('position',)
 
 
+class MachineSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = '__all__'
+        model = Machine
+
+
 class ConsumerSerializer(serializers.ModelSerializer):
     program = serializers.SerializerMethodField()
+    machine = MachineSerializer()
 
     @staticmethod
     def get_program(obj: Consumer):

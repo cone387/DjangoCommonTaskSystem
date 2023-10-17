@@ -1,6 +1,6 @@
 from typing import Optional
 from django_common_task_system.choices import ConsumeStatus, ContainerStatus
-from django_common_task_system.models import Consumer
+from django_common_task_system.models import Consumer, Machine
 from docker.errors import APIError
 from threading import Thread
 from docker.models.containers import Container
@@ -63,7 +63,8 @@ class ConsumerProgram(ContainerProgram):
     @classmethod
     def load_consumer_from_cache(cls, cache: dict):
         program = cache.pop('program')
-        consumer = Consumer(**cache)
+        machine = Machine(**cache.pop('machine'))
+        consumer = Consumer(machine=machine, **cache)
         if program:
             container_cache = program.get('container', {})
             if container_cache:

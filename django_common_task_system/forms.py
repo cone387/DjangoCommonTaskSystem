@@ -355,7 +355,6 @@ SETTINGS_TEMPLATE = """
 
 
 class ConsumerForm(forms.ModelForm):
-    machine = forms.ChoiceField(label='机器')
     consume_url = forms.ChoiceField(label='订阅地址', required=False)
     consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
     consume_host = forms.ChoiceField(label='订阅Host')
@@ -407,7 +406,7 @@ class ConsumerForm(forms.ModelForm):
             ('127.0.0.1', '127.0.0.1')
         )
         self.fields['consume_host'].choices = ip_choices
-        self.fields['machine'].choices = self.get_machine_choices()
+        # self.fields['machine'].choices = self.get_machine_choices()
         self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
@@ -451,7 +450,7 @@ class ConsumerForm(forms.ModelForm):
         if self.errors:
             return cleaned_data
         consumer: models.Consumer = self.instance
-        consumer.machine_ip, consumer.machine_name = cleaned_data['machine'].split('-', 1)
+        # consumer.machine_ip, consumer.machine_name = cleaned_data['machine'].split('-', 1)
         consumer.consume_url = cleaned_data.get('custom_consume_url') or urljoin(
             "%s://%s:%s" % (cleaned_data.get('consume_scheme'),
                             cleaned_data.get('consume_host'),
@@ -464,6 +463,7 @@ class ConsumerForm(forms.ModelForm):
             if not consumer.consume_kwargs.get('command'):
                 raise forms.ValidationError('command is required for mysql consume')
         consumer.program_type = cleaned_data['program_type']
+        consumer.machine = cleaned_data['machine']
         if consumer.program_type == ProgramType.DOCKER:
             consumer.program_setting = {
                 'image': cleaned_data['container_image'],
