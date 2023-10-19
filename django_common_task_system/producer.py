@@ -3,8 +3,7 @@ from django_common_task_system.choices import ScheduleStatus
 from django_common_task_system.builtins import builtins
 from django_common_task_system import get_schedule_model, get_schedule_serializer
 from django_common_task_system.models import AbstractSchedule
-from django_common_task_system.utils.logger import add_file_handler
-from django_common_task_system.program import Program, ProgramAgent, ProgramState
+from django_common_task_system.program import LocalProgram, ProgramAgent, ProgramState, Key
 from django_common_task_system.schedule.config import ScheduleConfig
 from datetime import datetime
 import time
@@ -23,18 +22,9 @@ class ProducerState(ProgramState):
         self.log_file = ''
 
 
-class Producer(Program):
+class Producer(LocalProgram):
     state_class = ProducerState
-    state_key = 'producer'
-
-    def __init__(self):
-        super(Producer, self).__init__(name='Producer')
-        self.log_file = add_file_handler(self.logger)
-
-    def init_state(self, **kwargs):
-        super(Producer, self).init_state(
-            log_file=self.log_file,
-        )
+    state_key = Key('producer')
 
     def produce(self):
         state = self.state
@@ -109,8 +99,8 @@ class ProducerThread(Producer, threading.Thread):
     def program_id(self) -> int:
         return self.ident
 
-    def stop(self):
-        super(ProducerThread, self).stop()
+    def stop(self, destroy=False):
+        super(ProducerThread, self).stop(destroy=destroy)
         while self.is_alive():
             time.sleep(0.5)
         return ''

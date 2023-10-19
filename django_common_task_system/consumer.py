@@ -5,7 +5,7 @@ from docker.errors import APIError
 from threading import Thread
 from docker.models.containers import Container
 from datetime import datetime
-from django_common_task_system.program import ContainerProgram, ProgramAgent, ProgramState
+from django_common_task_system.program import Program, ProgramAgent, ProgramState, Key, MapKey, ListKey
 import traceback
 import docker
 
@@ -28,16 +28,13 @@ class ConsumerState(ProgramState):
         self.container: Optional[Container] = None
 
 
-class ConsumerProgram(ContainerProgram):
+class ConsumerProgram(Program):
     state_class = ConsumerState
+    state_key = MapKey('consumers')
 
     def __init__(self, model: Consumer, container=None):
         self.model = model
-        self.state_key = 'consumer_%s' % model.consumer_id
         super().__init__(container=container)
-
-    def init_state(self, **kwargs):
-        pass
 
     @property
     def program_id(self) -> int:
@@ -63,7 +60,11 @@ class ConsumerProgram(ContainerProgram):
     @classmethod
     def load_consumer_from_cache(cls, cache: dict):
         program = cache.pop('program')
-        machine = Machine(**cache.pop('machine'))
+        machine_cache = cache.pop('machine')
+        if machine_cache:
+            machine = Machine(**machine_cache)
+        else:
+            machine = Machine.objects.local
         consumer = Consumer(machine=machine, **cache)
         if program:
             container_cache = program.get('container', {})
@@ -123,7 +124,7 @@ class ConsumerProgram(ContainerProgram):
             model.startup_log = traceback.format_exc()
         model.save()
 
-    def stop(self):
+    def stop(self, destroy=False):
         if isinstance(self.container, Container):
             self.container.stop()
             # self.container.remove()

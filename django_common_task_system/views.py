@@ -316,10 +316,7 @@ class UserConsumerView(APIView):
 
     def get(self, request: Request, action: str):
         if action == ContainerProgramAction.START:
-            consumer = Consumer.objects.create()
-            return Response(models.ConsumerSerializer(consumer).data)
-        if action == 'register':
-            return UserConsumerView.register_client(request)
+            return self.post(request, 'start')
         consumer_id = request.GET.get('consumer_id', '')
         if not consumer_id.isdigit():
             return Response({'error': 'invalid consumer_id: %s' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
@@ -338,42 +335,35 @@ class UserConsumerView(APIView):
             return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
                             status=status.HTTP_400_BAD_REQUEST)
 
-    @staticmethod
-    def register_client(request: Request):
-        """
-        container: Container = None
-        group = models.CharField(max_length=100, verbose_name='分组')
-        subscription_url = models.CharField(max_length=200, verbose_name='订阅地址')
-        subscription_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-        client_id = models.IntegerField(verbose_name='客户端ID', primary_key=True, default=0)
-        process_id = models.PositiveIntegerField(verbose_name='进程ID', null=True, blank=True)
-        container_id = models.CharField(max_length=100, verbose_name='容器ID', blank=True, null=True)
-        container_name = models.CharField(max_length=100, verbose_name='容器名称', blank=True, null=True)
-        container_image = models.CharField(max_length=100, verbose_name='容器镜像', blank=True, null=True)
-        container_status = models.CharField(choices=ContainerStatus.choices, default=ContainerStatus.NONE,
-                                            max_length=20, verbose_name='容器状态')
-        run_in_container = models.BooleanField(default=True, verbose_name='是否在容器中运行')
-        env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-        startup_status = models.CharField(max_length=500, choices=TaskClientStatus.choices,
-                                          verbose_name='启动结果', default=TaskClientStatus.SUCCEED)
-        settings = models.TextField(verbose_name='配置', blank=True, null=True)
-        create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-        startup_log = models.CharField(max_length=2000, null=True, blank=True)
-        """
-        data = request.data
-        settings = data.get('settings')
-        container_id = data.get('container_id')
-        subscription_url = data.get('subscription_url')
-        subscription_kwargs = data.get('subscription_kwargs')
-        process_id = data.get('process_id')
-        client = Consumer(container_id=container_id,
-                            subscription_url=subscription_url,
-                            startup_log='启动成功',
-                            settings=settings,
-                            process_id=process_id,
-                            )
-        client.save()
-        return Response('上报成功')
+    def post(self, request: Request, action: str):
+        if action == 'start':
+            data = {
+                'consume_url': request.data.get('consume_url'),
+            }
+        elif action == 'register':
+            serializer = models.ConsumerSerializer(data=request.data)
+            serializer.context['request'] = request
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        else:
+            return Response({'error': 'invalid action: %s, only support start/register' % action},
+                            status=status.HTTP_400_BAD_REQUEST)
+        # data = request.data
+        # settings = data.get('settings')
+        # machine_setting = data.get('machine')
+        # if not machine_setting:
+        #     pass
+        # machine = models.Machine(**machine_setting)
+        # container_setting = data.get('container')
+        # consume_url = data.get('consume_url')
+        # consume_kwargs = data.get('consume_kwargs')
+        # consumer = Consumer(machine=machine,
+        #                     consume_url=consume_url,
+        #                     consume_kwargs=consume_kwargs,
+        #                     )
+        # consumer.save()
+        # return Response(models.ConsumerSerializer(consumer).data)
 
 
 def log_view(request: Request, filename):

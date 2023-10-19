@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.admin import widgets
 from django.utils.module_loading import import_string
 from django_common_task_system.choices import (
-    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus)
+    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus, ProgramSource)
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
@@ -18,7 +18,6 @@ from urllib.parse import urljoin
 from django_common_task_system.utils.cache import ttl_cache
 from .choices import ProgramType
 from . import models
-from .builtins import builtins
 from . import get_schedule_model, get_task_model
 from .fields import (NLPSentenceWidget, PeriodScheduleFiled, OnceScheduleField, MultiWeekdaySelectFiled,
                      MultiMonthdaySelectFiled, MultiYearDaySelectWidget, MultiDaySelectField, PeriodWidget,
@@ -398,42 +397,12 @@ class ConsumerForm(forms.ModelForm):
             path = reverse('schedule-get', kwargs={'code': obj.code})
             consume_url_choices.append((path, obj.name))
         self.fields['consume_url'].choices = consume_url_choices
-        intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
-        internet_ip = self.get_internet_ip()
-        ip_choices = (
-            (intranet_ip, "%s(内网)" % intranet_ip),
-            (internet_ip, "%s(外网)" % internet_ip),
-            ('127.0.0.1', '127.0.0.1')
-        )
+        ip_choices = [(models.Machine.localhost_ip, '127.0.0.1(本机)')]
+        for machine in models.Machine.objects.all():
+            ip_choices.append((machine.intranet_ip, "%s(%s)内网" % (machine.intranet_ip, machine.hostname)))
+            ip_choices.append((machine.internet_ip, "%s(%s)外网" % (machine.internet_ip, machine.hostname)))
         self.fields['consume_host'].choices = ip_choices
-        # self.fields['machine'].choices = self.get_machine_choices()
         self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
-
-    @staticmethod
-    def get_machine_choices():
-        machines = {}
-        for o in models.Consumer.objects.all():
-            machines.setdefault(o.machine_ip, []).append(o)
-        choices = []
-        for ip, clients in machines.items():
-            choices.append(("%s-%s" % (ip, clients[0].machine_name),
-                            "%s(%s)%s clients running" % (ip, clients[0].machine_name, len(clients))))
-        intranet_ip = ttl_cache()(ip_utils.get_intranet_ip)()
-        internet_ip = ConsumerForm.get_internet_ip()
-        for ip in (intranet_ip, internet_ip, '127.0.0.1'):
-            if ip in machines:
-                break
-        else:
-            choices.append(('127.0.0.1-本机', "127.0.0.1(本机)0 clients running"))
-        return choices
-
-    @staticmethod
-    @ttl_cache()
-    def get_internet_ip():
-        try:
-            return ip_utils.get_internet_ip()
-        except Exception as e:
-            return "获取失败: %s" % str(e)[:50]
 
     @staticmethod
     def validate_setting(setting_str, setting_dict):
@@ -464,6 +433,7 @@ class ConsumerForm(forms.ModelForm):
                 raise forms.ValidationError('command is required for mysql consume')
         consumer.program_type = cleaned_data['program_type']
         consumer.machine = cleaned_data['machine']
+        consumer.program_source = ProgramSource.ADMIN
         if consumer.program_type == ProgramType.DOCKER:
             consumer.program_setting = {
                 'image': cleaned_data['container_image'],

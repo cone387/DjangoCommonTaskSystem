@@ -6,7 +6,7 @@ from queue import Queue
 from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
-from django_common_task_system.program import Program, ProgramState
+from django_common_task_system.program import LocalProgram, ProgramState, Key
 from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
 
@@ -175,19 +175,13 @@ class ConsumerState(ProgramState):
         self.log_file = ''
 
 
-class Consumer(Program):
+class Consumer(LocalProgram):
     state_class = ConsumerState
-    state_key = 'consumer'
+    state_key = Key('consumer')
 
     def __init__(self, queue: Queue):
         super(Consumer, self).__init__(name='Consumer', logger=logger)
         self.queue = queue
-        self.log_file = add_file_handler(self.logger)
-
-    def init_state(self):
-        super(Consumer, self).init_state(
-            log_file=self.log_file,
-        )
 
     def run(self):
         queue = self.queue

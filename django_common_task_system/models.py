@@ -6,7 +6,7 @@ from django.db import models
 from django_common_task_system.choices import (
     TaskStatus, ScheduleStatus, ScheduleCallbackStatus,
     ScheduleCallbackEvent, ScheduleQueueModule, ConsumeStatus, ProgramType,
-    PermissionType, ExecuteStatus, ScheduleExceptionReason
+    PermissionType, ExecuteStatus, ScheduleExceptionReason, ProgramSource
 )
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
@@ -20,8 +20,9 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.cache_service import cache_agent
 from functools import cmp_to_key
-from django_common_task_system.program import ContainerProgram
+from django_common_task_system.program import Program, RemoteContainer
 from rest_framework import serializers
+from django_common_task_system.utils import ip as ip_util
 import os
 import time
 import re
@@ -258,7 +259,7 @@ class QuerySet(list):
         order_by = []
         select_related = False
 
-    def using(self, alias):
+    def using(self, _):
         return self
 
     def all(self):
@@ -392,45 +393,90 @@ class ConsumerManager(CustomManager):
             consumer.program.stop()
         cache_agent.hdel(self.cache_key, consumer.consumer_id)
 
+    @staticmethod
+    def create(consume_url=None, program=None, program_source=ProgramSource.REPORT, **kwargs):
+        for field in Consumer._meta.fields:
+            if field.name not in kwargs and field.default is not models.fields.NOT_PROVIDED:
+                if callable(field.default):
+                    kwargs[field.name] = field.default()
+                else:
+                    kwargs[field.name] = field.default
+        machine = kwargs.pop('machine', None)
+        if program_source == ProgramSource.REPORT:
+            assert machine is not None, 'machine is required when program_source is REPORT'
+            assert consume_url is not None, 'consume_url is required when program_source is REPORT'
+            machine = Machine(**machine)
+        else:
+            if machine is None:
+                machine = Machine.objects.local
+            if consume_url is None:
+                consume_url = 'http://%s' % machine.localhost_ip
+        consumer = Consumer(consume_url=consume_url, machine=machine, **kwargs)
+        consumer.program = program
+        consumer.save()
+        return consumer
+
 
 class MachineManager(CustomManager):
+    _local = None
+
+    @property
+    def local(self):
+        if self._local is None:
+            for _ in range(3):
+                try:
+                    internet_ip = ip_util.get_internet_ip()
+                    break
+                except Exception:
+                    continue
+            else:
+                internet_ip = None
+            self._local = Machine(hostname='本机', intranet_ip=ip_util.get_intranet_ip(),
+                                  internet_ip=internet_ip, group='默认')
+        return self._local
 
     def all(self):
-        return QuerySet([
-            Machine(name='本机', ip='127.0.0.1', group='默认'),
-        ], Machine)
+        return QuerySet([self.local, *dict.values(self)], Machine)
 
 
 class Machine(models.Model):
-    name = models.CharField(max_length=100, verbose_name='机器名', primary_key=True)
-    ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
+    hostname = models.CharField(max_length=100, verbose_name='机器名')
+    intranet_ip = models.GenericIPAddressField(max_length=100, verbose_name='内网IP')
+    internet_ip = models.GenericIPAddressField(max_length=100, verbose_name='外网IP', primary_key=True)
     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
 
     objects = MachineManager()
+
+    @property
+    def localhost_ip(self):
+        return "127.0.0.1"
 
     class Meta:
         managed = False
         verbose_name = verbose_name_plural = '机器管理'
 
     def __str__(self):
-        return "%s(%s)" % (self.name, self.ip)
+        return "%s(%s)" % (self.hostname, self.intranet_ip)
+
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        Machine.objects[self.internet_ip] = self
 
 
 class Consumer(models.Model):
     # 两种运行模式: 容器模式，进程模式
-    program: ContainerProgram = None
+    program: Program = None
     machine = models.ForeignKey(Machine, on_delete=models.DO_NOTHING, db_constraint=False, verbose_name='机器')
     consumer_id = models.IntegerField(verbose_name='客户端ID', primary_key=True)
-    # machine_name = models.CharField(max_length=100, verbose_name='机器名', default='本机')
-    # machine_ip = models.GenericIPAddressField(max_length=100, verbose_name='机器IP', default='127.0.0.1')
-    # group = models.CharField(max_length=100, verbose_name='分组', default='默认')
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
     consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     program_type = models.CharField(max_length=100, verbose_name='运行引擎', choices=ProgramType.choices, 
                                     default=ProgramType.DOCKER)
     program_setting = models.JSONField(verbose_name='引擎设置', default=dict)
     program_env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-    consume_status = models.CharField(max_length=500, choices=ConsumeStatus.choices, 
+    program_source = models.IntegerField(verbose_name='程序来源', default=ProgramSource.REPORT)
+    consume_status = models.CharField(max_length=500, choices=ConsumeStatus.choices,
                                       verbose_name='启动结果', default=ConsumeStatus.RUNNING)
     startup_log = models.CharField(max_length=2000, null=True, blank=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -627,14 +673,18 @@ class Overview(models.Model):
 
 
 class MachineSerializer(serializers.ModelSerializer):
+    internet_ip = serializers.IPAddressField(read_only=True)
+
     class Meta:
         fields = '__all__'
         model = Machine
 
 
 class ConsumerSerializer(serializers.ModelSerializer):
-    program = serializers.SerializerMethodField()
+    program = serializers.SerializerMethodField(label='程序')
     machine = MachineSerializer()
+    consumer_id = serializers.IntegerField(read_only=True)
+    program_source = serializers.IntegerField(required=False, default=ProgramSource.REPORT)
 
     @staticmethod
     def get_program(obj: Consumer):
@@ -656,6 +706,14 @@ class ConsumerSerializer(serializers.ModelSerializer):
                 "program_class": program.__class__.__module__ + '.' + program.__class__.__name__,
             }
         return None
+
+    def create(self, validated_data):
+        if validated_data['program_source'] == ProgramSource.REPORT:
+            validated_data['machine']['internet_ip'] = self.context['request'].META.get('REMOTE_ADDR')
+            program = Program(container=RemoteContainer(self.initial_data['program']))
+        else:
+            program = None
+        return Consumer.objects.create(program=program, **validated_data)
 
     class Meta:
         fields = '__all__'

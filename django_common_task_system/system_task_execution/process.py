@@ -17,6 +17,6 @@ class ScheduleConsumerProcess(Consumer, Process):
         django.setup()
         super(ScheduleConsumerProcess, self).run()
 
-    def stop(self):
-        super(ScheduleConsumerProcess, self).stop()
+    def stop(self, destroy=False):
+        super(ScheduleConsumerProcess, self).stop(destroy=destroy)
         self.kill()

@@ -1,6 +1,4 @@
-from django.db.models import TextChoices
-import queue
-import os
+from django.db.models import TextChoices, IntegerChoices
 
 
 class TaskStatus(TextChoices):
@@ -70,6 +68,13 @@ class PermissionType(TextChoices):
 class ProgramType(TextChoices):
     DOCKER = 'Docker'
     PROCESS = 'Process'
+
+
+class ProgramSource(IntegerChoices):
+    REPORT = 1, '主动上报'
+    DETECT = 2, '被动检测'
+    ADMIN = 3, '管理员添加'
+    API = 4, 'API添加'
 
 
 class ConsumeStatus(TextChoices):

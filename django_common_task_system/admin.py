@@ -378,7 +378,7 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 class ConsumerAdmin(admin.ModelAdmin):
-    list_display = ('consumer_id', 'machine',
+    list_display = ('consumer_id', 'admin_machine',
                     'program_state',
                     'admin_consume_url',
                     'consume_status', 'program_status',
@@ -428,13 +428,14 @@ class ConsumerAdmin(admin.ModelAdmin):
     # list_filter = ('runner_status',)
     readonly_fields = ('create_time', )
 
-    def machine(self, obj: models.Consumer):
+    def admin_machine(self, obj: models.Consumer):
         attrs = [
-            '<b>IP</b>: %s' % obj.machine_ip,
-            '<b>主机名</b>: %s' % obj.machine_name,
+            '<b>主机名</b>: %s' % obj.machine.hostname,
+            '<b>内网IP</b>: %s' % obj.machine.intranet_ip,
+            '<b>外网IP</b>: %s' % obj.machine.internet_ip,
         ]
         return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
-    machine.short_description = '机器'
+    admin_machine.short_description = '机器'
 
     def program_status(self, obj: models.Consumer):
         return obj.program is not None and obj.program.is_running
@@ -458,11 +459,14 @@ class ConsumerAdmin(admin.ModelAdmin):
 
     def admin_consume_url(self, obj: models.Consumer):
         url = urlparse(obj.consume_url)
-        return format_html(
-            '<a href="%s" target="_blank">%s</a>' % (
-                obj.consume_url, url.path
+        try:
+            return format_html(
+                '<a href="%s" target="_blank">%s</a>' % (
+                    obj.consume_url, url.path
+                )
             )
-        )
+        except Exception as e:
+            return str(e)
     admin_consume_url.short_description = '消费地址'
 
     def action(self, obj: models.Consumer):
@@ -731,8 +735,9 @@ class OverviewAdmin(admin.ModelAdmin):
         consumer_agent.state.pull()
         state = consumer_agent.state
         consumer_state = {
-            '进程ID': state.ident,
-            '进程状态': '运行中' if state.is_running else '已停止',
+            '程序ID': state.ident,
+            "程序名称": state.program_name,
+            '程序状态': '运行中' if state.is_running else '已停止',
             '已处理计划数量': (state.succeed_count + state.failed_count),
             '成功计划数量': state.succeed_count,
             '失败计划数量': state.failed_count,
@@ -740,7 +745,7 @@ class OverviewAdmin(admin.ModelAdmin):
             '日志文件': state.log_file.replace(os.getcwd(), '')
         }
         model.objects['consumer'] = model(
-            name="系统计划处理进程",
+            name="系统计划消费线程",
             state=consumer_state,
             position=1
         )
@@ -748,9 +753,9 @@ class OverviewAdmin(admin.ModelAdmin):
         producer_agent.state.pull()
         state = producer_agent.state
         producer_state = {
-            "运行ID": state.ident,
-            "线程名称": state.name,
-            "线程状态": "运行中" if state.is_running else "已停止",
+            "程序ID": state.ident,
+            "程序名称": state.program_name,
+            "程序状态": "运行中" if state.is_running else "已停止",
             "已调度计划数量": state.scheduled_count,
             "最近调度时间": state.last_schedule_time,
             "日志文件": state.log_file.replace(os.getcwd(), '')

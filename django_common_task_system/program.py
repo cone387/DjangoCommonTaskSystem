@@ -1,11 +1,14 @@
+import json
 import threading
 import logging
 import enum
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 from docker.models.containers import Container
 from django_common_task_system.cache_service import cache_agent
 from django_common_task_system.choices import ContainerStatus
+from django_common_task_system.utils.logger import add_file_handler
+from django_common_task_system.log import PagedLog
 
 
 class ProgramAction(str, enum.Enum):
@@ -23,14 +26,47 @@ class ContainerProgramAction(str, enum.Enum):
     DESTROY = 'destroy'
 
 
+class RemoteContainer(Container):
+    def __init__(self, attrs):
+        super(RemoteContainer, self).__init__(attrs)
+
+    def start(self, **kwargs):
+        pass
+
+    def stop(self, **kwargs):
+        pass
+
+    def restart(self, **kwargs):
+        pass
+
+    def logs(self, **kwargs):
+        return ''
+
+    def remove(self, **kwargs):
+        pass
+
+
+class Key(str):
+    pass
+
+
+class MapKey(str):
+    pass
+
+
+class ListKey(str):
+    pass
+
+
 class ProgramState(dict):
-    def __init__(self, key):
+    def __init__(self, key: Union[MapKey, Key]):
         super(ProgramState, self).__init__()
         self.key = key
         self.ident = None
         self.is_running = False
         self.engine = None
         self.create_time = None
+        self.program_name = None
 
     def __setattr__(self, key, value):
         self[key] = value
@@ -42,27 +78,68 @@ class ProgramState(dict):
         return kwargs or self
 
     def push(self, **kwargs):
-        cache_agent.hset(self.key, mapping=kwargs)
+        if isinstance(self.key, Key):
+            cache_agent.hset(self.key, mapping=kwargs)
+        else:
+            cache_agent.hset(self.key, self.ident, json.dumps(kwargs))
 
     def commit_and_push(self, **kwargs):
         return self.push(**self.commit(**kwargs))
 
     def pull(self):
-        state = cache_agent.hgetall(self.key)
-        for k, v in state.items():
-            setattr(self, k, v)
+        if isinstance(self.key, Key):
+            state = cache_agent.hgetall(self.key)
+        else:
+            state = cache_agent.hget(self.key, self.ident)
+            if state:
+                state = json.loads(state)
+        if state:
+            for k, v in state.items():
+                setattr(self, k, v)
+
+    def delete(self):
+        if isinstance(self.key, Key):
+            cache_agent.delete(self.key)
+        else:
+            cache_agent.hdel(self.key, self.ident)
 
 
 class Program:
     state_class = ProgramState
-    state_key = ''
+    state_key: Key = None
 
-    def __init__(self, name=None, logger: logging.Logger = None):
-        assert self.state_key, 'state_key must be set'
+    def __init__(self, name=None, container=None, logger: logging.Logger = None):
+        assert isinstance(self.state_key, Key), 'state_key type must be Key'
         self._event = threading.Event()
         self.state = self.state_class(self.state_key)
-        self.program_name = name or self.__class__.__name__
-        self.logger = logger or logging.getLogger(self.program_name.lower())
+        self.container: Optional[Container, RemoteContainer] = container
+        self._program_name = name
+        self._logger = logger
+        self._log_file = None
+
+    @property
+    def program_name(self):
+        if self._program_name:
+            name = self._program_name
+        elif self.container is not None:
+            name = self.container.name
+        else:
+            name = self.__class__.__name__
+        return name
+
+    @property
+    def log_file(self):
+        if self._log_file is None:
+            _ = self.logger
+        return self._log_file
+
+    @property
+    def logger(self):
+        if self._logger is None:
+            self._logger = logging.getLogger(self.program_name)
+        if self._log_file is None:
+            self._log_file = add_file_handler(self._logger)
+        return self._logger
 
     @property
     def is_running(self):
@@ -72,12 +149,17 @@ class Program:
     def program_id(self) -> int:
         return os.getpid()
 
-    def init_state(self, **kwargs):
+    def pre_started(self):
         self.state.commit_and_push(
-            name=self.program_name,
+            program_name=self.program_name,
             is_running=False,
             engine=self.__class__.__name__,
-            **kwargs
+        )
+
+    def on_started(self):
+        self.state.commit_and_push(
+            is_running=True,
+            ident=self.program_id
         )
 
     def run(self) -> None:
@@ -91,50 +173,77 @@ class Program:
         if self.is_running:
             error = '%s already started, pid: %s' % (self, self.program_id)
         else:
-            self.init_state()
+            self.pre_started()
             start_program()
-            self.state.commit_and_push(is_running=True, ident=self.program_id)
+            self.on_started()
             self.logger.info('%s started, pid: %s' % (self, self.program_id))
             error = ''
         self.logger.info(error)
         return error
 
-    def stop(self):
+    def stop(self, destroy=False):
         self._event.clear()
+        if self.container:
+            self.container.stop()
+            if destroy:
+                self.container.remove()
+        if destroy:
+            self.state.delete()
+        else:
+            self.state.commit_and_push(
+                is_running=False,
+            )
 
     def read_log(self, page=0, page_size=10):
-        raise NotImplementedError
+        if self.container:
+            return self.container.logs(tail=page_size)
+        else:
+            return PagedLog(self.log_file, page_size=page_size).read_page(page=page)
 
     def __str__(self):
         return "Program(%s)" % self.__class__.__name__
 
 
-class ContainerProgram(Program):
-    def __init__(self, container=None):
-        self.container: Optional[Container] = container
-        super().__init__(name=getattr(container, 'name', None))
+class LocalProgram(Program):
 
     def run(self) -> None:
         raise NotImplementedError
 
-    def read_log(self, page=0, page_size=1000):
-        if self.container:
-            return self.container.logs(tail=page_size)
+    def pre_started(self):
+        self.state.commit_and_push(
+            name=self.program_name,
+            is_running=False,
+            engine=self.__class__.__name__,
+            log_file=self.log_file
+        )
 
-    # def start(self):
-    #     self.container.start()
-    #
-    def stop(self):
-        assert self.container, 'container must be set'
-        self.container.stop()
-        self.container.remove()
-
-    def restart(self):
-        self.container.restart()
-
-    @property
-    def is_running(self):
-        return self.container.status == ContainerStatus.RUNNING
+#
+# class ContainerProgram(Program):
+#     def __init__(self, container=None):
+#         self.container: Optional[Container, RemoteContainer] = container
+#         super().__init__(name=getattr(container, 'name', None))
+#
+#     def run(self) -> None:
+#         raise NotImplementedError
+#
+#     def read_log(self, page=0, page_size=1000):
+#         if self.container:
+#             return self.container.logs(tail=page_size)
+#
+#     # def start(self):
+#     #     self.container.start()
+#     #
+#     def stop(self):
+#         assert self.container, 'container must be set'
+#         self.container.stop()
+#         self.container.remove()
+#
+#     def restart(self):
+#         self.container.restart()
+#
+#     @property
+#     def is_running(self):
+#         return self.container.status == ContainerStatus.RUNNING
 
 
 class ProgramAgent:

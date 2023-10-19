@@ -13,7 +13,7 @@ class ScheduleConsumerThread(Consumer, threading.Thread):
     def program_id(self) -> int:
         return self.ident
 
-    def stop(self) -> str:
+    def stop(self, destroy=False) -> str:
         while self.is_alive():
             time.sleep(0.5)
         return ''
