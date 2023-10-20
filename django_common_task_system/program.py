@@ -3,7 +3,7 @@ import threading
 import logging
 import enum
 import os
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, List, Dict
 from docker.models.containers import Container
 from django_common_task_system.cache_service import cache_agent
 from django_common_task_system.choices import ContainerStatus
@@ -67,6 +67,8 @@ class ProgramState(dict):
         self.engine = None
         self.create_time = None
         self.program_name = None
+        self.program_class = None
+        self.container = None
 
     def __setattr__(self, key, value):
         self[key] = value
@@ -84,7 +86,11 @@ class ProgramState(dict):
             cache_agent.hset(self.key, self.ident, json.dumps(kwargs))
 
     def commit_and_push(self, **kwargs):
-        return self.push(**self.commit(**kwargs))
+        if isinstance(self.key, Key):
+            return self.push(**self.commit(**kwargs))
+        else:
+            self.commit(**kwargs)
+            return self.push(**self)
 
     def pull(self):
         if isinstance(self.key, Key):
@@ -104,18 +110,76 @@ class ProgramState(dict):
             cache_agent.hdel(self.key, self.ident)
 
 
+class ContainerState(dict):
+    def __init__(self, container: Container = None, state: Dict = None):
+        super(ContainerState, self).__init__()
+        assert container or state, 'container or state must be set'
+        if container:
+            config = container.attrs['Config']
+            self.name = container.name
+            self.id = container.id
+            self.short_id = container.short_id
+            self.status = container.status
+            self.environment = config['Env']
+            self.command = config['Cmd']
+            self.image = config['Image']
+            self.volume = config['Volumes']
+            self.create_time = container.attrs['Created']
+        else:
+            for k, v in state.items():
+                setattr(self, k, v)
+
+    def __setattr__(self, key, value):
+        self[key] = value
+        super(ContainerState, self).__setattr__(key, value)
+
+    def to_attrs(self):
+        return {
+            'Id': self.id,
+            'Created': self.create_time,
+            'State': {
+                'Status': self.status,
+            },
+            'Config': {
+                'Image': self.image,
+                'Cmd': self.command,
+                'Env': self.environment,
+                'Volumes': self.volume,
+            },
+        }
+
+    def to_container(self):
+        return RemoteContainer(self.to_attrs())
+
+
 class Program:
     state_class = ProgramState
     state_key: Key = None
 
     def __init__(self, name=None, container=None, logger: logging.Logger = None):
-        assert isinstance(self.state_key, Key), 'state_key type must be Key'
+        assert isinstance(self.state_key, (Key, MapKey, ListKey)), \
+            '%s.state_key type must be (Key, MapKey, ListKey), current is %s' % (
+                self.__class__.__name__, self.state_key)
         self._event = threading.Event()
         self.state = self.state_class(self.state_key)
         self.container: Optional[Container, RemoteContainer] = container
         self._program_name = name
         self._logger = logger
         self._log_file = None
+
+    @classmethod
+    def load_from_state(cls, state: dict):
+        container_state = state.pop('container', None)
+        if container_state:
+            container = ContainerState(state=container_state).to_container()
+        else:
+            container = None
+        program_class = state.pop('program_class', None)
+        package, program_class = program_class.rsplit('.', 1)
+        program_package = __import__(package, fromlist=[program_class])
+        program_class = getattr(program_package, program_class)
+        program = program_class(container=container)
+        return program
 
     @property
     def program_name(self):
@@ -154,13 +218,21 @@ class Program:
             program_name=self.program_name,
             is_running=False,
             engine=self.__class__.__name__,
+            program_class=self.__class__.__module__ + '.' + self.__class__.__name__,
         )
 
     def on_started(self):
-        self.state.commit_and_push(
-            is_running=True,
-            ident=self.program_id
-        )
+        if self.container:
+            self.state.commit_and_push(
+                container=ContainerState(self.container),
+                is_running=self.container.status == ContainerStatus.RUNNING.lower(),
+                ident=self.program_id
+            )
+        else:
+            self.state.commit_and_push(
+                is_running=True,
+                ident=self.program_id
+            )
 
     def run(self) -> None:
         raise NotImplementedError
@@ -216,6 +288,35 @@ class LocalProgram(Program):
             engine=self.__class__.__name__,
             log_file=self.log_file
         )
+
+
+class ProgramManager:
+    default_state_key = 'programs'
+
+    def __init__(self, key: Union[MapKey, str] = None, program_class=None):
+        if key is None:
+            key = program_class.state_key
+        if not key:
+            key = self.default_state_key
+        if isinstance(key, str):
+            key = MapKey(key)
+        assert isinstance(program_class.state_key, MapKey), 'state_key type must be MapKey'
+        self.state_key = key
+
+    def all(self) -> List[Program]:
+        programs = cache_agent.hgetall(self.state_key)
+        if programs:
+            return [Program.load_from_state(json.loads(program)) for program in programs.values()]
+        else:
+            return []
+
+    def get(self, program_id) -> Optional[Program]:
+        program = cache_agent.hget(self.state_key, program_id)
+        if program:
+            return Program.load_from_state(json.loads(program))
+
+    def add(self, program: Program) -> None:
+        program.state.push()
 
 #
 # class ContainerProgram(Program):

@@ -354,6 +354,7 @@ SETTINGS_TEMPLATE = """
 
 
 class ConsumerForm(forms.ModelForm):
+    program_source = forms.CharField(initial=ProgramSource.ADMIN.value, widget=forms.HiddenInput())
     consume_url = forms.ChoiceField(label='订阅地址', required=False)
     consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
     consume_host = forms.ChoiceField(label='订阅Host')
@@ -397,11 +398,13 @@ class ConsumerForm(forms.ModelForm):
             path = reverse('schedule-get', kwargs={'code': obj.code})
             consume_url_choices.append((path, obj.name))
         self.fields['consume_url'].choices = consume_url_choices
-        ip_choices = [(models.Machine.localhost_ip, '127.0.0.1(本机)')]
+        local = models.Machine.objects.local
+        ip_choices = [(local.localhost_ip, '%s(%s)' % (local.localhost_ip, local.hostname))]
         for machine in models.Machine.objects.all():
             ip_choices.append((machine.intranet_ip, "%s(%s)内网" % (machine.intranet_ip, machine.hostname)))
             ip_choices.append((machine.internet_ip, "%s(%s)外网" % (machine.internet_ip, machine.hostname)))
         self.fields['consume_host'].choices = ip_choices
+        self.initial['machine'] = models.Machine.objects.local
         self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
@@ -433,7 +436,7 @@ class ConsumerForm(forms.ModelForm):
                 raise forms.ValidationError('command is required for mysql consume')
         consumer.program_type = cleaned_data['program_type']
         consumer.machine = cleaned_data['machine']
-        consumer.program_source = ProgramSource.ADMIN
+        consumer.program_source = cleaned_data['program_source']
         if consumer.program_type == ProgramType.DOCKER:
             consumer.program_setting = {
                 'image': cleaned_data['container_image'],

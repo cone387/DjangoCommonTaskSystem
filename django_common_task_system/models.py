@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.functional import cached_property
 from django_common_task_system.cache_service import cache_agent
 from functools import cmp_to_key
-from django_common_task_system.program import Program, RemoteContainer
+# from django_common_task_system.program import Program, RemoteContainer, ProgramManager
 from rest_framework import serializers
 from django_common_task_system.utils import ip as ip_util
 import os
@@ -356,29 +356,47 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
-class ConsumerManager(CustomManager):
-    cache_key = 'consumers'
+class CacheManager(CustomManager):
+    cache_key = None
+
+    @property
+    def serializer_class(self):
+        raise NotImplementedError
 
     def all(self):
-        from .consumer import ConsumerProgram
-        consumers = []
+        objects = []
         consumer_mapping = cache_agent.hgetall(self.cache_key)
         if consumer_mapping:
-            for k, v in consumer_mapping.items():
-                consumers.append(ConsumerProgram.load_consumer_from_cache(v))
-        return QuerySet(consumers, Consumer)
+            for k, item in consumer_mapping.items():
+                if isinstance(item, str):
+                    item = json.loads(item)
+                serializer = self.serializer_class(data=item)
+                serializer.is_valid(raise_exception=True)
+                objects.append(serializer.save(commit=False))
+        return QuerySet(objects, self.model)
+
+    def add(self, obj: models.Model):
+        cache_agent.hset(self.cache_key, mapping={
+            obj.pk: self.serializer_class(obj).data,
+        })
 
     def get(self, pk, default=None):
-        string = cache_agent.hget(self.cache_key, pk)
-        if string:
-            from .consumer import ConsumerProgram
-            return ConsumerProgram.load_consumer_from_cache(json.loads(string))
+        cache = cache_agent.hget(self.cache_key, pk)
+        if cache:
+            if isinstance(cache, str):
+                cache = json.loads(cache)
+            serializer = self.serializer_class(data=cache)
+            serializer.is_valid(raise_exception=True)
+            return serializer.save(commit=False)
         return default
 
-    def add(self, consumer):
-        cache_agent.hset(self.cache_key, mapping={
-            consumer.consumer_id: ConsumerSerializer(consumer).data,
-        })
+
+class ConsumerManager(CacheManager):
+    cache_key = 'consumers'
+
+    @property
+    def serializer_class(self):
+        return ConsumerSerializer
 
     def update_or_create(self, consumer_id, **kwargs):
         super(ConsumerManager, self).update_or_create()
@@ -394,26 +412,27 @@ class ConsumerManager(CustomManager):
         cache_agent.hdel(self.cache_key, consumer.consumer_id)
 
     @staticmethod
-    def create(consume_url=None, program=None, program_source=ProgramSource.REPORT, **kwargs):
+    def create(program=None, commit=True, **kwargs):
         for field in Consumer._meta.fields:
             if field.name not in kwargs and field.default is not models.fields.NOT_PROVIDED:
                 if callable(field.default):
                     kwargs[field.name] = field.default()
                 else:
                     kwargs[field.name] = field.default
+        program_source = kwargs.pop('program_source', ProgramSource.REPORT)
         machine = kwargs.pop('machine', None)
+        if machine is not None:
+            machine = Machine(**machine)
         if program_source == ProgramSource.REPORT:
             assert machine is not None, 'machine is required when program_source is REPORT'
-            assert consume_url is not None, 'consume_url is required when program_source is REPORT'
-            machine = Machine(**machine)
+            assert kwargs.get('consume_url'), 'consume_url is required when program_source is REPORT'
         else:
             if machine is None:
                 machine = Machine.objects.local
-            if consume_url is None:
-                consume_url = 'http://%s' % machine.localhost_ip
-        consumer = Consumer(consume_url=consume_url, machine=machine, **kwargs)
-        consumer.program = program
-        consumer.save()
+            if not kwargs.get('consume_url'):
+                kwargs['consume_url'] = 'http://%s' % str(machine.localhost_ip)
+        consumer = Consumer(machine=machine, program_source=program_source, **kwargs)
+        consumer.save(commit=commit)
         return consumer
 
 
@@ -464,9 +483,40 @@ class Machine(models.Model):
         Machine.objects[self.internet_ip] = self
 
 
+class ProgramManager(CacheManager):
+    cache_key = 'programs'
+
+    @property
+    def serializer_class(self):
+        return ProgramSerializer
+
+
+class Program(models.Model):
+    program_id = models.IntegerField(verbose_name='程序ID', primary_key=True)
+    container = models.JSONField(verbose_name='容器信息', null=True, blank=True)
+    program_name = models.CharField(max_length=100, verbose_name='程序名')
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    objects = ProgramManager()
+
+    class Meta:
+        managed = False
+        verbose_name = verbose_name_plural = '程序管理'
+
+    def __str__(self):
+        return str(self.program_id)
+
+    def save(
+        self, force_insert=False, force_update=False, using=None, update_fields=None
+    ):
+        Program.objects[self.program_id] = self
+
+
 class Consumer(models.Model):
     # 两种运行模式: 容器模式，进程模式
-    program: Program = None
+    # program: Program = None
+    program = models.ForeignKey(Program, on_delete=models.DO_NOTHING, db_constraint=False,
+                                verbose_name='程序', null=True, blank=True)
     machine = models.ForeignKey(Machine, on_delete=models.DO_NOTHING, db_constraint=False, verbose_name='机器')
     consumer_id = models.IntegerField(verbose_name='客户端ID', primary_key=True)
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
@@ -475,10 +525,11 @@ class Consumer(models.Model):
                                     default=ProgramType.DOCKER)
     program_setting = models.JSONField(verbose_name='引擎设置', default=dict)
     program_env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-    program_source = models.IntegerField(verbose_name='程序来源', default=ProgramSource.REPORT)
+    program_source = models.IntegerField(verbose_name='程序来源', default=ProgramSource.REPORT,
+                                         choices=ProgramSource.choices)
     consume_status = models.CharField(max_length=500, choices=ConsumeStatus.choices,
                                       verbose_name='启动结果', default=ConsumeStatus.RUNNING)
-    startup_log = models.CharField(max_length=2000, null=True, blank=True)
+    startup_log = models.TextField(null=True, blank=True)
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     setting = models.JSONField(verbose_name='消费端设置', default=dict)
 
@@ -490,6 +541,11 @@ class Consumer(models.Model):
 
     def __str__(self):
         return str(self.consumer_id)
+
+    # @property
+    # def program(self):
+    #     from django_common_task_system.consumer import ConsumerProgram
+    #     return ProgramManager(program_class=ConsumerProgram).get(self.consumer_id)
 
     @cached_property
     def settings_file(self):
@@ -506,23 +562,25 @@ class Consumer(models.Model):
         return os.path.join(log_path, "log_%s.log" % self.consumer_id)
 
     def save(
-            self, force_insert=False, force_update=False, using=None, update_fields=None
+            self, commit=True, force_insert=False, force_update=False, using=None, update_fields=None
     ):
         if not self.consumer_id:
             # 使用毫秒级时间戳作为consumer_id
             self.consumer_id = int(time.time() * 1000)
-        Consumer.objects.add(self)
-        # consumer不可更新，只能创建和删除
-        if self.program is None:
-            self.create_time = timezone.now()
-            post_save.send(
-                sender=Consumer,
-                instance=self,
-                created=True,
-                update_fields=update_fields,
-                raw=False,
-                using=using,
-            )
+        if commit:
+            Consumer.objects.add(self)
+
+            # consumer不可更新，只能创建和删除
+            if self.program is None:
+                self.create_time = timezone.now()
+                post_save.send(
+                    sender=Consumer,
+                    instance=self,
+                    created=True,
+                    update_fields=update_fields,
+                    raw=False,
+                    using=using,
+                )
 
     def delete(self, using=None, keep_parents=False):
         Consumer.objects.delete(self)
@@ -673,17 +731,23 @@ class Overview(models.Model):
 
 
 class MachineSerializer(serializers.ModelSerializer):
-    internet_ip = serializers.IPAddressField(read_only=True)
+    internet_ip = serializers.IPAddressField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         fields = '__all__'
         model = Machine
 
 
+class ProgramSerializer(serializers.ModelSerializer):
+    class Meta:
+        fields = '__all__'
+        model = Program
+
+
 class ConsumerSerializer(serializers.ModelSerializer):
     program = serializers.SerializerMethodField(label='程序')
     machine = MachineSerializer()
-    consumer_id = serializers.IntegerField(read_only=True)
+    consumer_id = serializers.IntegerField(required=False, allow_null=True)
     program_source = serializers.IntegerField(required=False, default=ProgramSource.REPORT)
 
     @staticmethod
@@ -707,13 +771,44 @@ class ConsumerSerializer(serializers.ModelSerializer):
             }
         return None
 
-    def create(self, validated_data):
-        if validated_data['program_source'] == ProgramSource.REPORT:
-            validated_data['machine']['internet_ip'] = self.context['request'].META.get('REMOTE_ADDR')
-            program = Program(container=RemoteContainer(self.initial_data['program']))
+    def save(self, **kwargs):
+        assert hasattr(self, '_errors'), (
+            'You must call `.is_valid()` before calling `.save()`.'
+        )
+
+        assert not self.errors, (
+            'You cannot call `.save()` on a serializer with invalid data.'
+        )
+
+        assert not hasattr(self, '_data'), (
+            "You cannot call `.save()` after accessing `serializer.data`."
+            "If you need to access data before committing to the database then "
+            "inspect 'serializer.validated_data' instead. "
+        )
+
+        validated_data = {**self.validated_data, **kwargs}
+
+        if self.instance is not None:
+            self.instance = self.update(self.instance, validated_data)
+            assert self.instance is not None, (
+                '`update()` did not return an object instance.'
+            )
         else:
-            program = None
-        return Consumer.objects.create(program=program, **validated_data)
+            self.instance = self.create(validated_data)
+            assert self.instance is not None, (
+                '`create()` did not return an object instance.'
+            )
+
+        return self.instance
+
+    def create(self, validated_data):
+        commit = validated_data.pop('commit', True)
+        if commit and validated_data['program_source'] == ProgramSource.REPORT:
+            validated_data['machine']['internet_ip'] = self.context['request'].META.get('REMOTE_ADDR')
+            # program = Program(container=RemoteContainer(self.initial_data['program']))
+        # else:
+        program = None
+        return Consumer.objects.create(program=program, commit=commit, **validated_data)
 
     class Meta:
         fields = '__all__'

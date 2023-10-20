@@ -30,7 +30,7 @@ class ConsumerState(ProgramState):
 
 class ConsumerProgram(Program):
     state_class = ConsumerState
-    state_key = MapKey('consumers')
+    state_key = MapKey('consumer-programs')
 
     def __init__(self, model: Consumer, container=None):
         self.model = model
@@ -54,7 +54,7 @@ class ConsumerProgram(Program):
             consume_kwargs=kwargs,
             create_time=datetime.strptime(container.attrs['Created'].split('.')[0], "%Y-%m-%dT%H:%M:%S"),
         )
-        consumer.program = cls(model=consumer, container=container)
+        # consumer.program = cls(model=consumer, container=container)
         consumer.save()
 
     @classmethod
@@ -90,7 +90,7 @@ class ConsumerProgram(Program):
         settings_file = '/mnt/task-system-client-settings.py'
         command = f'common-task-system-client --subscription-url="{model.consume_url}" --settings="{settings_file}"'
         try:
-            container = docker_client.containers.create(
+            self.container = docker_client.containers.create(
                 setting.image, command=command, name=setting.name,
                 volumes=[f"{model.settings_file}:{settings_file}"],
                 detach=True
@@ -106,30 +106,29 @@ class ConsumerProgram(Program):
                     pass
             else:
                 raise RuntimeError('pull image failed: %s' % setting.image)
-            container = docker_client.containers.create(setting.image,
+            self.container = docker_client.containers.create(setting.image,
                                                         command=command,
                                                         name=setting.name, detach=True)
-        container.start()
-        container = docker_client.containers.get(container.short_id)
-        self.container = container
+        self.container.start()
+        self.container = docker_client.containers.get(self.container.short_id)
 
     def run(self):
         model = self.model
-        model.program = self
+        # model.program = self
         try:
             self._run()
             model.consume_status = ConsumeStatus.RUNNING
         except Exception as _:
             model.consume_status = ConsumeStatus.FAILED
             model.startup_log = traceback.format_exc()
-        model.save()
+        model.save(commit=False)
 
     def stop(self, destroy=False):
         if isinstance(self.container, Container):
             self.container.stop()
             # self.container.remove()
             self.model.consume_status = ConsumeStatus.STOPPED
-            self.model.save()
+            self.model.save(commit=False)
 
     def read_log(self, page=0, page_size=1000):
         if self.model.consume_status == ConsumeStatus.RUNNING.value:

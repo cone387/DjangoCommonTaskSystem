@@ -382,12 +382,13 @@ class ConsumerAdmin(admin.ModelAdmin):
                     'program_state',
                     'admin_consume_url',
                     'consume_status', 'program_status',
+                    'program_source',
                     'action', 'create_time')
     form = forms.ConsumerForm
     fieldsets = (
         (None, {
             'fields': (
-                ('machine', 'program_type')
+                ('machine', 'program_type', 'program_source')
             ),
         }),
         ("容器配置", {
