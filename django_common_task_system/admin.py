@@ -1,6 +1,7 @@
 import os
 import docker
 from django.contrib import admin, messages
+from django.core.exceptions import ObjectDoesNotExist
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
@@ -18,7 +19,7 @@ from . import forms
 from . import models
 from .builtins import builtins
 from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
-    ScheduleStatus, ExecuteStatus, ConsumeStatus, ContainerStatus
+    ScheduleStatus, ExecuteStatus, ConsumerStatus, ContainerStatus
 
 UserModel = models.UserModel
 Task: models.Task = get_task_model()
@@ -377,18 +378,16 @@ class ExceptionReportAdmin(admin.ModelAdmin):
         return [field.name for field in self.model._meta.fields]
 
 
-class ConsumerAdmin(admin.ModelAdmin):
-    list_display = ('consumer_id', 'admin_machine',
-                    'program_state',
-                    'admin_consume_url',
-                    'consume_status', 'program_status',
-                    'program_source',
-                    'action', 'create_time')
-    form = forms.ConsumerForm
+class MachineAdmin(admin.ModelAdmin):
+    list_display = ('id', 'hostname', 'intranet_ip', 'internet_ip')
+
+
+class ProgramAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                ('machine', 'program_type', 'program_source')
+                'consumer',
+                ('machine', 'type')
             ),
         }),
         ("容器配置", {
@@ -405,17 +404,10 @@ class ConsumerAdmin(admin.ModelAdmin):
             ),
             "classes": ("process-config",)
         },),
-        ("订阅配置", {
-            'fields': (
-                'consume_url',
-                ('consume_scheme', 'consume_host', 'consume_port'),
-                'custom_consume_url',
-                'consume_kwargs',
-            )},),
         ("高级配置", {
             'fields': (
-                'setting',
-                'program_env',
+                'settings',
+                'env',
             ),
             "classes": ("collapse", )
         }),
@@ -425,38 +417,49 @@ class ConsumerAdmin(admin.ModelAdmin):
             ),
         }),
     )
+    list_display = ('id', 'machine', 'name', 'type', 'is_running', 'create_time')
+    readonly_fields = ("create_time", "process_id")
+    form = forms.ProgramForm
 
-    # list_filter = ('runner_status',)
-    readonly_fields = ('create_time', )
+    # def has_add_permission(self, request):
+    #     return False
+    #
+    # def has_change_permission(self, request, obj=None):
+    #     return False
+    #
+    # def has_delete_permission(self, request, obj=None):
+    #     return False
 
-    def admin_machine(self, obj: models.Consumer):
-        attrs = [
-            '<b>主机名</b>: %s' % obj.machine.hostname,
-            '<b>内网IP</b>: %s' % obj.machine.intranet_ip,
-            '<b>外网IP</b>: %s' % obj.machine.internet_ip,
-        ]
-        return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
-    admin_machine.short_description = '机器'
+    class Media:
+        js = (
+            'https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js',
+            'common_task_system/js/task_client_admin.js',
+        )
+
+
+class ConsumerAdmin(admin.ModelAdmin):
+    list_display = ('id',
+                    'admin_consume_url',
+                    'program', 'program_status',
+                    'status',
+                    'source',
+                    'action', 'create_time')
+    form = forms.ConsumerForm
+    fields = (
+        'program',
+        'consume_url',
+        ('consume_scheme', 'consume_host', 'consume_port'),
+        'custom_consume_url',
+        'consume_kwargs',
+        'settings',
+        'source'
+    )
+    readonly_fields = ('create_time', 'program')
 
     def program_status(self, obj: models.Consumer):
-        return obj.program is not None and obj.program.is_running
+        return obj.program and obj.program.is_running
     program_status.short_description = '程序状态'
     program_status.boolean = True
-
-    def program_state(self, obj):
-        if obj.program is None:
-            return '-'
-        program = models.ConsumerSerializer(obj).data['program']
-        container = program.get('container', {})
-        # 分行展示
-        attrs = [
-            '<b>程序</b>: %s' % program['program_class'],
-        ]
-        for k, v in container.items():
-            # k粗体 加大行间距
-            attrs.append('<b>%s</b>: %s' % (k, v))
-        return format_html('<span style="line-height: 2">%s</span>' % '<br>'.join(attrs) if attrs else '-')
-    program_state.short_description = '程序状态'
 
     def admin_consume_url(self, obj: models.Consumer):
         url = urlparse(obj.consume_url)
@@ -474,21 +477,21 @@ class ConsumerAdmin(admin.ModelAdmin):
         start_url = reverse('user-consumer-action', args=('start',)) + '?consumer_id=%s' % obj.pk
         stop_url = reverse('user-consumer-action', args=('stop',)) + '?consumer_id=%s' % obj.pk
         log_url = reverse('user-consumer-action', args=('log',)) + '?consumer_id=%s' % obj.pk
-        destroy_url = reverse('user-consumer-action', args=('destroy',)) + '?consumer_id=%s' % obj.pk
-        start_action = '<a href="%s" target="_blank">启动</a>' % start_url
+        start_action = '<a href="%s" target="_blank">运行</a>' % start_url
         stop_action = '<a href="%s" target="_blank">停止</a>' % stop_url
-        destroy_action = '<a href="%s" target="_blank">销毁</a>' % destroy_url
         log_action = '<a href="%s" target="_blank">日志</a>' % log_url
-        if obj.program is None:
-            actions = [start_action, log_action, destroy_action]
-        elif obj.program.is_running:
-            actions = [stop_action, log_action, destroy_action]
-        elif obj.program.container is not None and obj.program.container.status == ContainerStatus.PAUSED:
-            actions = [start_action, log_action, destroy_action]
+        try:
+            program = obj.program
+        except ObjectDoesNotExist:
+            program = None
+        if program is None:
+            actions = [start_action]
+        elif program.is_running:
+            actions = [stop_action, log_action]
         else:
-            actions = [log_action, destroy_action]
+            actions = [stop_action, log_action]
         return format_html(
-            '<span style="line-height: 2">%s</span>' % "<br>".join(actions)
+            '<span style="line-height: 1">%s</span>' % " | ".join(actions)
         )
     action.short_description = '操作'
 
@@ -505,6 +508,8 @@ class ConsumerAdmin(admin.ModelAdmin):
                 })
             except APIError as e:
                 self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
+            except docker.errors.DockerException:
+                pass
             else:
                 for container in containers:
                     consumer.ConsumerProgram.load_from_container(container)
@@ -512,18 +517,6 @@ class ConsumerAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         self.load_local_containers(request)
         return models.Consumer.objects.all()
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    class Media:
-        js = (
-            'https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js',
-            # 'https://cdn.bootcss.com/popper.js/1.14.3/umd/popper.min.js',
-            # 'https://cdn.bootcss.com/bootstrap/4.1.3/js/bootstrap.min.js',
-            # # reverse('admin:jsi18n'),
-            'common_task_system/js/task_client_admin.js',
-        )
 
 
 class ScheduleFilter(admin.SimpleListFilter):
@@ -818,6 +811,8 @@ admin.site.register(models.ScheduleQueuePermission, ScheduleQueuePermissionAdmin
 admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
 admin.site.register(models.RetrySchedule, RetryScheduleAdmin)
+admin.site.register(models.Machine, MachineAdmin)
+admin.site.register(models.Program, ProgramAdmin)
 admin.site.register(models.Consumer, ConsumerAdmin)
 
 

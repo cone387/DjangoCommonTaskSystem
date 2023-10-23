@@ -65,27 +65,31 @@ class PermissionType(TextChoices):
     IP_WHITE_LIST = 'I', 'IP白名单'
 
 
-class ProgramType(TextChoices):
-    DOCKER = 'Docker'
-    PROCESS = 'Process'
+class ProgramType(IntegerChoices):
+    DOCKER = 1, 'Docker'
+    PROCESS = 2, '进程'
 
 
-class ProgramSource(IntegerChoices):
+class ConsumerSource(IntegerChoices):
     REPORT = 1, '主动上报'
     DETECT = 2, '被动检测'
     ADMIN = 3, '管理员添加'
     API = 4, 'API添加'
 
 
-class ConsumeStatus(TextChoices):
+class ConsumerStatus(IntegerChoices):
     # start status
-    INIT = 'Init', '初始化'
-    PULLING = 'Pulling', '拉取镜像中'
-    BUILDING = 'Building', '构建中'
-    STOPPING = 'Stopping', '停止中'
-    STOPPED = 'Stopped', '已停止'
-    RUNNING = 'Running', '启动成功'
-    FAILED = 'Failed', '启动失败'
+    # INIT = 'Init', '初始化'
+    # PULLING = 'Pulling', '拉取镜像中'
+    # BUILDING = 'Building', '构建中'
+    # STOPPING = 'Stopping', '停止中'
+    # STOPPED = 'Stopped', '已停止'
+    # RUNNING = 'Running', '启动成功'
+    # FAILED = 'Failed', '启动失败'
+    CREATED = 1, '已创建'
+    RUNNING = 2, '运行中'
+    STOPPED = 3, '已停止'
+    FAILED = 4, '消费失败'
 
 
 class ContainerStatus(TextChoices):

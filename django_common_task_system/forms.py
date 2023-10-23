@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.admin import widgets
 from django.utils.module_loading import import_string
 from django_common_task_system.choices import (
-    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus, ProgramSource)
+    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus, ConsumerSource)
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
@@ -339,6 +339,23 @@ class ReadOnlyWidget(forms.TextInput):
         super(ReadOnlyWidget, self).__init__(attrs=attrs)
 
 
+class ProgramForm(forms.ModelForm):
+    process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
+    container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
+    container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': 'cone387/common-task-system-client:latest'}
+    ), required=False)
+    container_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': 'common-task-system-client'}
+    ), required=False)
+    env = forms.CharField(
+        label='环境变量',
+        max_length=500,
+        initial='DJANGO_SETTINGS_MODULE=%s' % os.environ.get('DJANGO_SETTINGS_MODULE'),
+        widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": "5"}),
+    )
+
+
 SETTINGS_TEMPLATE = """
 # DISPATCHER = "task_system_client.task_center.dispatch.ParentAndOptionalNameDispatcher"
 # consume = "task_system_client.task_center.consume.Httpconsume"
@@ -354,7 +371,7 @@ SETTINGS_TEMPLATE = """
 
 
 class ConsumerForm(forms.ModelForm):
-    program_source = forms.CharField(initial=ProgramSource.ADMIN.value, widget=forms.HiddenInput())
+    source = forms.CharField(initial=ConsumerSource.ADMIN.value, widget=forms.HiddenInput())
     consume_url = forms.ChoiceField(label='订阅地址', required=False)
     consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
     consume_host = forms.ChoiceField(label='订阅Host')
@@ -368,26 +385,12 @@ class ConsumerForm(forms.ModelForm):
         attrs={'rows': 1, 'style': 'width: 60%;',
                'placeholder': '{"queue": "test", "command": "select * from table limit 1"}'}
     ), required=False)
-    process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
-    container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
-    container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
-        attrs={'style': 'width: 60%;', 'placeholder': 'cone387/common-task-system-client:latest'}
-    ), required=False)
-    container_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
-        attrs={'style': 'width: 60%;', 'placeholder': 'common-task-system-client'}
-    ), required=False)
-    setting = forms.CharField(
+    settings = forms.CharField(
         label='配置',
         max_length=5000,
         initial=SETTINGS_TEMPLATE,
         required=False,
         widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": len(SETTINGS_TEMPLATE.split('\n'))}),
-    )
-    program_env = forms.CharField(
-        label='环境变量',
-        max_length=500,
-        initial='DJANGO_SETTINGS_MODULE=%s' % os.environ.get('DJANGO_SETTINGS_MODULE'),
-        widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": "5"}),
     )
 
     def __init__(self, *args, **kwargs):
@@ -398,14 +401,14 @@ class ConsumerForm(forms.ModelForm):
             path = reverse('schedule-get', kwargs={'code': obj.code})
             consume_url_choices.append((path, obj.name))
         self.fields['consume_url'].choices = consume_url_choices
-        local = models.Machine.objects.local
+        local = models.Machine.local()
         ip_choices = [(local.localhost_ip, '%s(%s)' % (local.localhost_ip, local.hostname))]
         for machine in models.Machine.objects.all():
             ip_choices.append((machine.intranet_ip, "%s(%s)内网" % (machine.intranet_ip, machine.hostname)))
             ip_choices.append((machine.internet_ip, "%s(%s)外网" % (machine.internet_ip, machine.hostname)))
         self.fields['consume_host'].choices = ip_choices
-        self.initial['machine'] = models.Machine.objects.local
-        self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
+        # self.initial['machine'] = models.Machine.objects.local
+        # self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
     def validate_setting(setting_str, setting_dict):
@@ -413,37 +416,23 @@ class ConsumerForm(forms.ModelForm):
             exec(setting_str, None, setting_dict)
         except Exception as e:
             raise forms.ValidationError('settings参数错误: %s' % e)
-        
-    def _post_clean(self):
-        pass
 
     def clean(self):
         cleaned_data = super(ConsumerForm, self).clean()
         if self.errors:
             return cleaned_data
-        consumer: models.Consumer = self.instance
-        # consumer.machine_ip, consumer.machine_name = cleaned_data['machine'].split('-', 1)
-        consumer.consume_url = cleaned_data.get('custom_consume_url') or urljoin(
+        consume_url = cleaned_data.get('custom_consume_url') or urljoin(
             "%s://%s:%s" % (cleaned_data.get('consume_scheme'),
                             cleaned_data.get('consume_host'),
-                            cleaned_data.get('consume_port')),
-            cleaned_data.get('consume_url'))
-        if consumer.consume_url.startswith('redis'):
-            if not consumer.consume_kwargs.get('queue'):
+                            cleaned_data.get('consume_port')), cleaned_data.get('consume_url'))
+        consume_kwargs = cleaned_data.get('consume_kwargs')
+        if consume_url.startswith('redis'):
+            if not consume_kwargs.get('queue'):
                 raise forms.ValidationError('queue is required for redis consume')
-        if consumer.consume_url.startswith('mysql'):
-            if not consumer.consume_kwargs.get('command'):
+        if consume_url.startswith('mysql'):
+            if not consume_kwargs.get('command'):
                 raise forms.ValidationError('command is required for mysql consume')
-        consumer.program_type = cleaned_data['program_type']
-        consumer.machine = cleaned_data['machine']
-        consumer.program_source = cleaned_data['program_source']
-        if consumer.program_type == ProgramType.DOCKER:
-            consumer.program_setting = {
-                'image': cleaned_data['container_image'],
-                'name': cleaned_data['container_name'],
-                'id': cleaned_data['container_id'],
-            }
-        self.validate_setting(cleaned_data['setting'], consumer.setting)
+        self.validate_setting(cleaned_data['settings'], {})
         return cleaned_data
 
     class Meta:

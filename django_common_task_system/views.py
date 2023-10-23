@@ -1,5 +1,7 @@
 from datetime import datetime
 from queue import Empty
+
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
@@ -23,12 +25,13 @@ from django_common_task_system.schedule import util as schedule_util
 from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.program import ProgramAction, ProgramAgent, ContainerProgramAction
-from .choices import ConsumeStatus, ScheduleStatus
+from .choices import ConsumerStatus, ScheduleStatus, ConsumerSource
 from .models import Consumer
 from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
 from .log import PagedLog
+from .consumer import consume, ConsumerProgram
 from typing import List, Dict, Union
 import os
 
@@ -93,16 +96,26 @@ def delete_task(sender, instance: Task, **kwargs):
                 os.rmdir(path)
 
 
-@receiver(post_save, sender=models.Consumer)
-def add_consumer(sender, instance: models.Consumer, created, **kwargs):
-    from .consumer import consume
-    consume(instance)
+@receiver(post_save, sender=models.Program)
+def start_program(sender, instance: models.Program, created, **kwargs):
+    if created:
+        from .consumer import ConsumerProgram
+        program = ConsumerProgram(instance)
+        program.start_if_not_started()
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
         development server in single-threaded mode:
         $ python manage.py  runserver --nothreading --noreload
     """
+
+
+@receiver(post_delete, sender=models.Program)
+def stop_program(sender, instance: models.Program, **kwargs):
+    from .consumer import ConsumerProgram
+    program = ConsumerProgram(instance)
+    program.stop()
+
 
 # for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
 #     if sig is not None:
@@ -314,56 +327,54 @@ class ScheduleTimeParseView(APIView):
 
 class UserConsumerView(APIView):
 
+    @staticmethod
+    def create_serializer(request, **kwargs) -> serializers.ConsumerSerializer:
+        serializer = serializers.ConsumerSerializer(data=kwargs)
+        serializer.context['request'] = request
+        serializer.is_valid(raise_exception=True)
+        return serializer
+
     def get(self, request: Request, action: str):
-        if action == ContainerProgramAction.START:
-            return self.post(request, 'start')
         consumer_id = request.GET.get('consumer_id', '')
-        if not consumer_id.isdigit():
+        if consumer_id and not consumer_id.isdigit():
             return Response({'error': 'invalid consumer_id: %s' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
-        consumer: Consumer = Consumer.objects.get(consumer_id)
+        consumer = program = None
+        if consumer_id:
+            try:
+                consumer = Consumer.objects.get(pk=consumer_id)
+                program = consumer.program
+            except (Consumer.DoesNotExist, ObjectDoesNotExist):
+                pass
+        if action == ContainerProgramAction.START:
+            if program is not None:
+                return Response({'error': 'consumer(%s)已经启动' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
+            if consumer is None:
+                consumer = self.create_serializer(request, source=ConsumerSource.API, **request.data).instance
+            program = models.Program.objects.create(consumer=consumer)
+            program.save()
+            return Response(serializers.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
         if consumer is None:
             raise NotFound('Consumer(%s)不存在' % consumer_id)
         if action == ContainerProgramAction.STOP:
-            consumer.program.stop()
-            return Response(models.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
-        elif action == ContainerProgramAction.DESTROY:
-            consumer.delete()
-            return Response(models.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
+            if program is not None:
+                program.delete()
+            return Response(serializers.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
         elif action == ContainerProgramAction.LOG:
-            return HttpResponse(consumer.program.read_log(), content_type='text/plain; charset=utf-8')
+            if program is None:
+                raise NotFound('Consumer(%s)未启动' % consumer_id)
+            program = ConsumerProgram(program)
+            return HttpResponse(program.read_log(), content_type='text/plain; charset=utf-8')
         else:
             return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
                             status=status.HTTP_400_BAD_REQUEST)
 
     def post(self, request: Request, action: str):
-        if action == 'start':
-            data = {
-                'consume_url': request.data.get('consume_url'),
-            }
-        elif action == 'register':
-            serializer = models.ConsumerSerializer(data=request.data)
-            serializer.context['request'] = request
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
+        if action == 'register':
+            serializer = self.create_serializer(request, source=ConsumerSource.API, **request.data)
             return Response(serializer.data)
         else:
             return Response({'error': 'invalid action: %s, only support start/register' % action},
                             status=status.HTTP_400_BAD_REQUEST)
-        # data = request.data
-        # settings = data.get('settings')
-        # machine_setting = data.get('machine')
-        # if not machine_setting:
-        #     pass
-        # machine = models.Machine(**machine_setting)
-        # container_setting = data.get('container')
-        # consume_url = data.get('consume_url')
-        # consume_kwargs = data.get('consume_kwargs')
-        # consumer = Consumer(machine=machine,
-        #                     consume_url=consume_url,
-        #                     consume_kwargs=consume_kwargs,
-        #                     )
-        # consumer.save()
-        # return Response(models.ConsumerSerializer(consumer).data)
 
 
 def log_view(request: Request, filename):
@@ -440,8 +451,3 @@ class ExceptionReportView(CreateAPIView):
         meta = self.request.META
         ip = meta.get('HTTP_X_FORWARDED_FOR') if meta.get('HTTP_X_FORWARDED_FOR') else meta.get('REMOTE_ADDR')
         serializer.save(ip=ip)
-
-
-@api_view(['GET'])
-def update_settings(request):
-    pass

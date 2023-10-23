@@ -1,6 +1,6 @@
-from typing import Optional
-from django_common_task_system.choices import ConsumeStatus, ContainerStatus
-from django_common_task_system.models import Consumer, Machine
+from typing import Optional, Callable
+from django_common_task_system.choices import ConsumerStatus, ContainerStatus
+from django_common_task_system import models
 from docker.errors import APIError
 from threading import Thread
 from docker.models.containers import Container
@@ -8,11 +8,11 @@ from datetime import datetime
 from django_common_task_system.program import Program, ProgramAgent, ProgramState, Key, MapKey, ListKey
 import traceback
 import docker
+import os
 
 
 class ContainerSetting:
-    def __init__(self, program_setting: dict):
-        setting = program_setting.get('container', {})
+    def __init__(self, setting: dict):
         self.image = setting.get('image', 'cone387/common-task-system-client:latest')
         self.name = setting.get('name', 'common-task-system-client-%s' % datetime.now().strftime('%Y%m%d%H%M%S'))
         self.id = setting.get('id', '')
@@ -21,35 +21,19 @@ class ContainerSetting:
         self.status = ContainerStatus.NONE
 
 
-class ConsumerState(ProgramState):
-    def __init__(self, key):
-        super(ConsumerState, self).__init__(key)
-        self.model = None
-        self.container: Optional[Container] = None
-
-
-class ConsumerProgram(Program):
-    state_class = ConsumerState
-    state_key = MapKey('consumer-programs')
-
-    def __init__(self, model: Consumer, container=None):
-        self.model = model
-        super().__init__(container=container)
-
-    @property
-    def program_id(self) -> int:
-        return self.model.consumer_id
+class ConsumerProgram:
+    def __init__(self, program: models.Program):
+        self.program = program
 
     @property
     def is_running(self):
-        return self.model.consume_status == ConsumeStatus.RUNNING and self.container is not None and \
-               self.container.status == ContainerStatus.RUNNING.lower()
+        return self.program.is_running
 
     @classmethod
     def load_from_container(cls, container: Container):
         kwargs = {x.split('=')[0].strip('-'): x.split('=')[1] for x in container.attrs['Args'] if '=' in x}
         consume_url = kwargs.pop('subscription-url', None)
-        consumer = Consumer(
+        consumer = models.Consumer(
             consume_url=consume_url,
             consume_kwargs=kwargs,
             create_time=datetime.strptime(container.attrs['Created'].split('.')[0], "%Y-%m-%dT%H:%M:%S"),
@@ -57,42 +41,26 @@ class ConsumerProgram(Program):
         # consumer.program = cls(model=consumer, container=container)
         consumer.save()
 
-    @classmethod
-    def load_consumer_from_cache(cls, cache: dict):
-        program = cache.pop('program')
-        machine_cache = cache.pop('machine')
-        if machine_cache:
-            machine = Machine(**machine_cache)
-        else:
-            machine = Machine.objects.local
-        consumer = Consumer(machine=machine, **cache)
-        if program:
-            container_cache = program.get('container', {})
-            if container_cache:
-                docker_client = docker.from_env()
-                try:
-                    container = docker_client.containers.get(container_cache['short_id'])
-                    if container.status == ContainerStatus.RUNNING.lower():
-                        consumer.consume_status = ConsumeStatus.RUNNING
-                    else:
-                        consumer.consume_status = ConsumeStatus.STOPPED
-                except docker.errors.NotFound:
-                    container = None
-                consumer.program = cls(model=consumer, container=container)
-        return consumer
-
     def _run(self):
-        model = self.model
+        program = self.program
+        consumer = program.consumer
         # pull image
         docker_client = docker.from_env()
-        self.model.startup_status = ConsumeStatus.PULLING
-        setting = ContainerSetting(model.program_setting)
-        settings_file = '/mnt/task-system-client-settings.py'
-        command = f'common-task-system-client --subscription-url="{model.consume_url}" --settings="{settings_file}"'
+        setting = ContainerSetting(program.container)
+        tmp_path = os.path.join(os.getcwd(), "tmp")
+        if not os.path.exists(tmp_path):
+            os.makedirs(tmp_path)
+        machine_settings_file = os.path.join(tmp_path, "settings_%s.py" % consumer.id)
+        container_settings_file = '/mnt/task-system-client-settings.py'
+        command = ' '.join([
+            'common-task-system-client',
+            '--subscription-url="{consumer.consume_url}"',
+            '--settings="{container_settings_file}"'
+        ])
         try:
             self.container = docker_client.containers.create(
                 setting.image, command=command, name=setting.name,
-                volumes=[f"{model.settings_file}:{settings_file}"],
+                volumes=[f"{machine_settings_file}:{container_settings_file}"],
                 detach=True
             )
         except docker.errors.ImageNotFound:
@@ -106,61 +74,44 @@ class ConsumerProgram(Program):
                     pass
             else:
                 raise RuntimeError('pull image failed: %s' % setting.image)
-            self.container = docker_client.containers.create(setting.image,
-                                                        command=command,
-                                                        name=setting.name, detach=True)
+            self.container = docker_client.containers.create(
+                setting.image, command=command, name=setting.name, detach=True)
         self.container.start()
         self.container = docker_client.containers.get(self.container.short_id)
 
     def run(self):
-        model = self.model
-        # model.program = self
+        program = self.program
         try:
             self._run()
-            model.consume_status = ConsumeStatus.RUNNING
+            program.is_running = True
         except Exception as _:
-            model.consume_status = ConsumeStatus.FAILED
-            model.startup_log = traceback.format_exc()
-        model.save(commit=False)
+            program.is_running = False
+            program.startup_log = traceback.format_exc()
+        program.save()
 
-    def stop(self, destroy=False):
-        if isinstance(self.container, Container):
-            self.container.stop()
-            # self.container.remove()
-            self.model.consume_status = ConsumeStatus.STOPPED
-            self.model.save(commit=False)
+    def start_if_not_started(self) -> str:
+        start_program: Callable[[], None] = getattr(self, 'start', None)
+        if start_program is None:
+            start_program = getattr(self, 'run', None)
+        assert start_program, 'start or run method must be implemented'
+        if self.is_running:
+            print('%s already started, pid: %s' % (self, self.program))
+        else:
+            start_program()
 
     def read_log(self, page=0, page_size=1000):
-        if self.model.consume_status == ConsumeStatus.RUNNING.value:
-            log = super(ConsumerProgram, self).read_log(page=page, page_size=page_size)
+        if self.program.is_running:
+            # log = super(ConsumerProgram, self).read_log(page=page, page_size=page_size)
+            log = "running"
         else:
-            log = self.model.startup_log
+            log = self.program.startup_log
         return log
 
-
-class ConsumerProgramThread(ConsumerProgram, Thread):
-
-    def __init__(self, model):
-        Thread.__init__(self, daemon=True)
-        super().__init__(model=model)
+    def stop(self):
+        pass
 
 
 def consume(model):
     program = ConsumerProgram(model)
     program.start_if_not_started()
     return program
-
-#
-# class ConsumerAgent(ProgramAgent):
-#
-#     def __init__(self, program_class):
-#         self._program_class = program_class
-#         self._program: ConsumerProgramThread = program_class()
-#
-#     def stop(self) -> str:
-#         program: ConsumerProgramThread = self._program
-#         program.stop()
-#         return ''
-#
-#
-# consumer_agent = ConsumerAgent(program_class=ConsumerProgramThread)

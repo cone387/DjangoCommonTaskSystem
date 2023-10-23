@@ -3,6 +3,8 @@ from . import models
 from django_common_objects.serializers import CommonCategorySerializer, CommonTagSerializer
 from rest_framework import serializers
 
+from .choices import ConsumerSource
+
 TaskModel = get_task_model()
 ScheduleModel = get_schedule_model()
 ScheduleLogModel = get_schedule_log_model()
@@ -85,3 +87,33 @@ class ExceptionSerializer(serializers.ModelSerializer):
     class Meta:
         fields = '__all__'
         model = models.ExceptionReport
+
+
+class MachineSerializer(serializers.ModelSerializer):
+    internet_ip = serializers.IPAddressField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        fields = '__all__'
+        model = models.Machine
+
+
+class ProgramSerializer(serializers.ModelSerializer):
+    machine = MachineSerializer()
+
+    class Meta:
+        fields = '__all__'
+        model = models.Program
+
+
+class ConsumerSerializer(serializers.ModelSerializer):
+    program = ProgramSerializer(required=False)
+    source = serializers.IntegerField(required=False, default=ConsumerSource.REPORT)
+
+    def create(self, validated_data):
+        if validated_data['source'] == ConsumerSource.REPORT:
+            validated_data['machine']['internet_ip'] = self.context['request'].META.get('REMOTE_ADDR')
+        return super(ConsumerSerializer, self).create(validated_data)
+
+    class Meta:
+        fields = '__all__'
+        model = models.Consumer
