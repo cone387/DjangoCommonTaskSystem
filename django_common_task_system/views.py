@@ -1,8 +1,9 @@
+import uuid
 from datetime import datetime
 from queue import Empty
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db import connection
+from django.db import connection, IntegrityError
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.shortcuts import render
@@ -11,7 +12,7 @@ from django_common_objects.models import CommonCategory
 from jionlp_time import parse_time
 from rest_framework import status
 from rest_framework.decorators import api_view
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.generics import CreateAPIView, RetrieveAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,9 +32,10 @@ from .builtins import builtins
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
 from .log import PagedLog
-from .consumer import consume, ConsumerProgram
+from .consumer import consume, ConsumerProgram, ConsumerState
 from typing import List, Dict, Union
 import os
+import json
 
 
 User = models.UserModel
@@ -173,6 +175,13 @@ class ScheduleAPI:
     @staticmethod
     @api_view(['GET'])
     def get(request: Request, code: str):
+        """"
+            获取任务时，code参数为队列名称, 另外会传入consumer_id参数, 用于支持指定消费者
+        """
+        try:
+            state = ConsumerState.from_str(request.query_params.get('consumer', ''))
+        except Exception as e:
+            return Response({'error': f'consumer参数格式错误: {e}'}, status=status.HTTP_400_BAD_REQUEST)
         instance = builtins.schedule_queues.get(code, None)
         if instance is None:
             return Response({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
@@ -187,6 +196,8 @@ class ScheduleAPI:
             return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
             return Response({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
+        finally:
+            state.push()
         return Response(schedule)
 
     @staticmethod
@@ -334,22 +345,29 @@ class UserConsumerView(APIView):
         serializer.is_valid(raise_exception=True)
         return serializer
 
-    def get(self, request: Request, action: str):
-        consumer_id = request.GET.get('consumer_id', '')
-        if consumer_id and not consumer_id.isdigit():
-            return Response({'error': 'invalid consumer_id: %s' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
+    @staticmethod
+    def get_consumer_and_program(consumer_id: str) -> (Consumer, models.Program):
         consumer = program = None
         if consumer_id:
+            try:
+                uuid.UUID(consumer_id).version == 4
+            except ValueError:
+                raise ValidationError('无效的consumer_id: %s' % consumer_id)
             try:
                 consumer = Consumer.objects.get(pk=consumer_id)
                 program = consumer.program
             except (Consumer.DoesNotExist, ObjectDoesNotExist):
                 pass
+        return consumer, program
+
+    def get(self, request: Request, action: str):
+        consumer_id = request.GET.get('consumer_id', '')
+        consumer, program = self.get_consumer_and_program(consumer_id)
         if action == ContainerProgramAction.START:
             if program is not None:
                 return Response({'error': 'consumer(%s)已经启动' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
             if consumer is None:
-                consumer = self.create_serializer(request, source=ConsumerSource.API, **request.data).instance
+                consumer = self.create_serializer(request, source=ConsumerSource.API, **request.data).save()
             program = models.Program.objects.create(consumer=consumer)
             program.save()
             return Response(serializers.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
@@ -370,8 +388,26 @@ class UserConsumerView(APIView):
 
     def post(self, request: Request, action: str):
         if action == 'register':
-            serializer = self.create_serializer(request, source=ConsumerSource.API, **request.data)
-            return Response(serializer.data)
+            data = dict(request.data)
+            machine = data.pop('machine', {})
+            if not isinstance(machine, dict):
+                return Response({'error': 'machine is required'}, status=status.HTTP_400_BAD_REQUEST)
+            machine['internet_ip'] = request.META.get('REMOTE_ADDR')
+            serializer = serializers.MachineSerializer(data=machine)
+            serializer.is_valid(raise_exception=True)
+            try:
+                machine = serializer.save()
+            except IntegrityError:
+                machine = models.Machine.objects.get(**machine)
+            data['machine_id'] = machine.mac
+
+            consumer = data.pop('consumer', {})
+            consumer = self.create_serializer(request, source=ConsumerSource.REPORT, **consumer).save()
+            data['consumer_id'] = consumer.id
+            serializer = serializers.ProgramSerializer(data=data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
         else:
             return Response({'error': 'invalid action: %s, only support start/register' % action},
                             status=status.HTTP_400_BAD_REQUEST)

@@ -5,7 +5,7 @@ import enum
 import os
 from typing import Callable, Optional, Union, List, Dict
 from docker.models.containers import Container
-from django_common_task_system.cache_service import cache_agent
+from django_common_task_system.cache_service import cache_agent, CacheState
 from django_common_task_system.choices import ContainerStatus
 from django_common_task_system.utils.logger import add_file_handler
 from django_common_task_system.log import PagedLog
@@ -58,10 +58,9 @@ class ListKey(str):
     pass
 
 
-class ProgramState(dict):
+class ProgramState(CacheState):
     def __init__(self, key: Union[MapKey, Key]):
-        super(ProgramState, self).__init__()
-        self.key = key
+        super(ProgramState, self).__init__(key)
         self.ident = None
         self.is_running = False
         self.engine = None
@@ -70,27 +69,11 @@ class ProgramState(dict):
         self.program_class = None
         self.container = None
 
-    def __setattr__(self, key, value):
-        self[key] = value
-        super(ProgramState, self).__setattr__(key, value)
-
-    def commit(self, **kwargs) -> dict:
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-        return kwargs or self
-
     def push(self, **kwargs):
         if isinstance(self.key, Key):
             cache_agent.hset(self.key, mapping=kwargs)
         else:
             cache_agent.hset(self.key, self.ident, json.dumps(kwargs))
-
-    def commit_and_push(self, **kwargs):
-        if isinstance(self.key, Key):
-            return self.push(**self.commit(**kwargs))
-        else:
-            self.commit(**kwargs)
-            return self.push(**self)
 
     def pull(self):
         if isinstance(self.key, Key):

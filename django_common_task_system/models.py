@@ -1,5 +1,3 @@
-import json
-
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
@@ -10,21 +8,16 @@ from django_common_task_system.choices import (
 )
 from django_common_objects.models import CommonTag, CommonCategory
 from django_common_objects import fields as common_fields
-from datetime import datetime, timezone
+from datetime import datetime
 from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.schedule import util as schedule_util
-from django.db.models.signals import post_save
 from django.utils import timezone
-from django.utils.functional import cached_property
-from django_common_task_system.cache_service import cache_agent
 from functools import cmp_to_key
-# from django_common_task_system.program import Program, RemoteContainer, ProgramManager
-from rest_framework import serializers
 from django_common_task_system.utils import ip as ip_util
-import os
-import time
+from docker.models.containers import Container
+import uuid
 import re
 
 
@@ -356,18 +349,38 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
+def get_mac_address():
+    import uuid
+    node = uuid.getnode()
+    mac = uuid.UUID(int=node).hex[-12:]
+    return mac
+
+
+def get_hostname():
+    import socket
+    return socket.gethostname()
+
+
 class Machine(models.Model):
-    id = models.AutoField(primary_key=True, verbose_name='ID')
+    mac = models.CharField(max_length=12, verbose_name='MAC地址', primary_key=True)
     hostname = models.CharField(max_length=100, verbose_name='机器名')
     intranet_ip = models.GenericIPAddressField(max_length=100, verbose_name='内网IP')
     internet_ip = models.GenericIPAddressField(max_length=100, verbose_name='外网IP')
     group = models.CharField(max_length=100, verbose_name='分组', default='默认')
+    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
 
     @staticmethod
     def local():
-        return Machine.objects.get_or_create(intranet_ip=ip_util.get_intranet_ip(),
-                                             internet_ip=ip_util.get_internet_ip(),
-                                             defaults={'hostname': '本机', 'group': '默认'})[0]
+        mac = get_mac_address()
+        local = Machine.objects.filter(mac=mac).first()
+        if not local:
+            local = Machine.objects.create(
+                mac=mac,
+                hostname=get_hostname(),
+                intranet_ip=ip_util.get_intranet_ip(),
+                internet_ip=ip_util.get_internet_ip(),
+            )
+        return local
 
     @property
     def localhost_ip(self):
@@ -376,25 +389,26 @@ class Machine(models.Model):
     class Meta:
         db_table = 'consumer_machine'
         verbose_name = verbose_name_plural = '机器管理'
-        unique_together = (('intranet_ip', 'internet_ip'), )
+        ordering = ('-create_time',)
 
     def __str__(self):
         return "%s(%s)" % (self.hostname, self.intranet_ip)
 
 
 class Consumer(models.Model):
-    id = models.AutoField(primary_key=True, verbose_name='ID')
+    id = models.UUIDField(primary_key=True, verbose_name='ID', default=uuid.uuid4)
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
     consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     source = models.IntegerField(verbose_name='消费来源', default=ConsumerSource.REPORT, choices=ConsumerSource.choices)
     status = models.IntegerField(choices=ConsumerStatus.choices, verbose_name='状态', default=ConsumerStatus.CREATED)
     settings = models.JSONField(verbose_name='消费端设置', null=True, blank=True)
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         verbose_name = verbose_name_plural = '消费端管理'
         db_table = 'schedule_consumer'
+        ordering = ('-create_time',)
 
     def __str__(self):
         return str(self.id)
@@ -413,14 +427,15 @@ class Program(models.Model):
     settings = models.JSONField(verbose_name='设置', null=True, blank=True, default=dict)
     env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
     startup_log = models.TextField(null=True, blank=True)
-    create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
 
     class Meta:
         verbose_name = verbose_name_plural = '程序管理'
         db_table = 'consumer_program'
+        ordering = ('-create_time',)
 
     def __str__(self):
-        return str(self.id)
+        return "Program(machine=%s, process=%s)" % (self.machine, self.process_id)
 
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None

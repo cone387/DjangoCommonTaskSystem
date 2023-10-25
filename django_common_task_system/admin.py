@@ -379,7 +379,7 @@ class ExceptionReportAdmin(admin.ModelAdmin):
 
 
 class MachineAdmin(admin.ModelAdmin):
-    list_display = ('id', 'hostname', 'intranet_ip', 'internet_ip')
+    list_display = ('mac', 'hostname', 'intranet_ip', 'internet_ip')
 
 
 class ProgramAdmin(admin.ModelAdmin):
@@ -438,9 +438,9 @@ class ProgramAdmin(admin.ModelAdmin):
 
 
 class ConsumerAdmin(admin.ModelAdmin):
-    list_display = ('id',
+    list_display = ('short_id',
                     'admin_consume_url',
-                    'program', 'program_status',
+                    'program_state',
                     'status',
                     'source',
                     'action', 'create_time')
@@ -455,11 +455,34 @@ class ConsumerAdmin(admin.ModelAdmin):
         'source'
     )
     readonly_fields = ('create_time', 'program')
+    list_filter = ('status', 'source')
 
-    def program_status(self, obj: models.Consumer):
-        return obj.program and obj.program.is_running
-    program_status.short_description = '程序状态'
-    program_status.boolean = True
+    def short_id(self, obj: models.Consumer):
+        return obj.id.hex[0:8]
+    short_id.short_description = 'ID'
+
+    def program_state(self, obj: models.Consumer):
+        states = [
+            '<b>Machine</b>: <a href="/admin/%s/%s/%s/change/">%s</a>' % (
+                models.Machine._meta.app_label, models.Machine._meta.model_name,
+                obj.program.machine.mac, obj.program.machine
+            ),
+            '<b>Process</b>: <a href="/admin/%s/%s/%s/change/">%s</a>' % (
+                models.Program._meta.app_label, models.Program._meta.model_name,
+                obj.program.id, obj.program.process_id
+            ),
+            '<b>Container</b>: %s' % (obj.program.container if obj.program.container else '-'),
+            '<b>Status</b>: %s' % ('<span style="color: green">Running</span>'
+                                   if obj.program.is_running else '<span style="color: red">Stopped</span>'),
+        ]
+        return format_html('<span style="line-height: 1">%s</span>' % '<br>'.join(states))
+
+    program_state.short_description = '程序'
+
+    # def program_status(self, obj: models.Consumer):
+    #     return obj.program and obj.program.is_running
+    # program_status.short_description = '程序状态'
+    # program_status.boolean = True
 
     def admin_consume_url(self, obj: models.Consumer):
         url = urlparse(obj.consume_url)
@@ -495,28 +518,28 @@ class ConsumerAdmin(admin.ModelAdmin):
         )
     action.short_description = '操作'
 
-    containers_loaded = False
+    # containers_loaded = False
 
-    def load_local_containers(self, request):
-        if not self.containers_loaded:
-            ConsumerAdmin.containers_loaded = True
-            try:
-                client = docker.from_env()
-                containers = client.containers.list(all=True, filters={
-                    "name": "common-task-system-client",
-                    "ancestor": "common-task-system-client"
-                })
-            except APIError as e:
-                self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
-            except docker.errors.DockerException:
-                pass
-            else:
-                for container in containers:
-                    consumer.ConsumerProgram.load_from_container(container)
+    def load_local_consumers(self, request):
+        # if not self.containers_loaded:
+        ConsumerAdmin.containers_loaded = True
+        try:
+            client = docker.from_env()
+            containers = client.containers.list(all=True, filters={
+                "name": "common-task-system-client",
+                # "ancestor": "common-task-system-client" [common-task-system-client, cone387/common-task-system-client]
+            })
+        except APIError as e:
+            self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
+        except docker.errors.DockerException:
+            pass
+        else:
+            for container in containers:
+                models.Consumer.load_from_container(container)
 
     def get_queryset(self, request):
-        self.load_local_containers(request)
-        return models.Consumer.objects.all()
+        self.load_local_consumers(request)
+        return models.Consumer.objects.all().select_related('program', 'program__machine')
 
 
 class ScheduleFilter(admin.SimpleListFilter):

@@ -566,6 +566,49 @@ class CacheAgent:
         _socket.close()
 
 
+class Key(str):
+    pass
+
+
+class MapKey(str):
+    pass
+
+
+class ListKey(str):
+    pass
+
+
+class CacheState(dict):
+    def __init__(self, key: Union[MapKey, Key, ListKey]):
+        super(CacheState, self).__init__()
+        self.key = key
+
+    def __setattr__(self, key, value):
+        self[key] = value
+        super(CacheState, self).__setattr__(key, value)
+
+    def commit(self, **kwargs) -> dict:
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+        return kwargs or self
+
+    def push(self, **kwargs):
+        raise NotImplementedError
+
+    def commit_and_push(self, **kwargs):
+        if isinstance(self.key, Key):
+            return self.push(**self.commit(**kwargs))
+        else:
+            self.commit(**kwargs)
+            return self.push(**self)
+
+    def pull(self):
+        raise NotImplementedError
+
+    def delete(self):
+        raise NotImplementedError
+
+
 def ensure_service_available():
     if CACHE_SERVICE['engine'] == 'redis':
         import redis

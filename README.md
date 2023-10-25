@@ -85,6 +85,7 @@ sh deploy.sh -t server -s your_setting_module_path[optinal]
 - [x] redis
 - [x] thread queue
 - [x] process queue
+- [x] socket queue
 
 > 目前在MacOS上使用Multiprocessing.Queue会报错
 
@@ -123,6 +124,33 @@ sh deploy.sh -t server -s your_setting_module_path[optinal]
 -[x] 启动/停止任务客户端 
 -[ ] 上报任务客户端状态
 
+任务客户端访问消费任务的接口也会视为一次心跳, 用来判断任务客户端是否存活
+心跳信息内容包含以下字段
+```json
+{
+  "consumer_id": "任务客户端ID",
+  "machine_ip": "任务客户端IP",
+}
+```
+将任务客户端数据存储到缓存服务中, 存储格式为
+```json
+{
+  "client_id": {
+    "machine": {
+      "hostname": "",
+      "internal_ip": "",
+      "external_ip": ""
+    },
+    "process_id": "",
+    "container": {
+        "id": "",
+        "name": "",
+        "image": ""
+    }
+  }
+}
+```
+
 
 ## 日志
 - [x] 记录计划执行日志(HTTP接口上报)
@@ -131,3 +159,5 @@ sh deploy.sh -t server -s your_setting_module_path[optinal]
 ## 异常处理
 - [x] 记录任务执行异常日志(HTTP接口上报)
 
+## TODO
+- [ ] 支持指定任务客户端执行任务

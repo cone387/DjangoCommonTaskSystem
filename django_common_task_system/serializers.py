@@ -91,28 +91,29 @@ class ExceptionSerializer(serializers.ModelSerializer):
 
 class MachineSerializer(serializers.ModelSerializer):
     internet_ip = serializers.IPAddressField(required=False, allow_blank=True, allow_null=True)
+    mac = serializers.CharField(required=False, label='MAC地址', max_length=12)
 
     class Meta:
         fields = '__all__'
         model = models.Machine
+        validators = []
 
 
 class ProgramSerializer(serializers.ModelSerializer):
-    machine = MachineSerializer()
+    machine = MachineSerializer(read_only=True)
+    machine_id = serializers.PrimaryKeyRelatedField(source='machine',
+                                                    queryset=models.Machine.objects.all(), write_only=True)
+    consumer_id = serializers.PrimaryKeyRelatedField(source='consumer',
+                                                     queryset=models.Consumer.objects.all(), write_only=True)
 
     class Meta:
-        fields = '__all__'
+        exclude = ('consumer', )
         model = models.Program
 
 
 class ConsumerSerializer(serializers.ModelSerializer):
     program = ProgramSerializer(required=False)
     source = serializers.IntegerField(required=False, default=ConsumerSource.REPORT)
-
-    def create(self, validated_data):
-        if validated_data['source'] == ConsumerSource.REPORT:
-            validated_data['machine']['internet_ip'] = self.context['request'].META.get('REMOTE_ADDR')
-        return super(ConsumerSerializer, self).create(validated_data)
 
     class Meta:
         fields = '__all__'

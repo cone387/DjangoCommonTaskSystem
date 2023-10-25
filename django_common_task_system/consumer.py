@@ -1,14 +1,49 @@
+import json
 from typing import Optional, Callable
 from django_common_task_system.choices import ConsumerStatus, ContainerStatus
 from django_common_task_system import models
 from docker.errors import APIError
-from threading import Thread
 from docker.models.containers import Container
 from datetime import datetime
-from django_common_task_system.program import Program, ProgramAgent, ProgramState, Key, MapKey, ListKey
+from django_common_task_system.cache_service import CacheState, MapKey, cache_agent
 import traceback
 import docker
 import os
+
+
+class ConsumerState(CacheState):
+
+    def __init__(self, data):
+        super(ConsumerState, self).__init__(key=MapKey('consumers'))
+        self.consumer_id = data['consumer_id']
+        self.machine = data['machine']
+        self.container = data['container']
+        self.process_id: str = data['process_id']
+        assert len(self.consumer_id) == 36, 'consumer_id长度必须为36位'
+        assert self.process_id.isdigit(), 'process_id必须为数字'
+        assert self.machine['mac'], 'mac不能为空'
+        self.update_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    @classmethod
+    def from_str(cls, data: str):
+        data = json.loads(data)
+        return cls(data)
+
+    def pull(self):
+        state = cache_agent.hget(self.key, self.consumer_id)
+        if state:
+            state = json.loads(state)
+            for k, v in state.items():
+                setattr(self, k, v)
+
+    def delete(self):
+        cache_agent.hdel(self.key, self.consumer_id)
+
+    def push(self, **kwargs):
+        try:
+            cache_agent.hset(self.key, self.consumer_id, json.dumps(self))
+        except Exception as e:
+            print(e)
 
 
 class ContainerSetting:
