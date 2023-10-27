@@ -89,32 +89,34 @@ class ExceptionSerializer(serializers.ModelSerializer):
         model = models.ExceptionReport
 
 
-class MachineSerializer(serializers.ModelSerializer):
-    internet_ip = serializers.IPAddressField(required=False, allow_blank=True, allow_null=True)
-    mac = serializers.CharField(required=False, label='MAC地址', max_length=12)
+# class MachineSerializer(serializers.ModelSerializer):
+#     internet_ip = serializers.IPAddressField(required=False, allow_blank=True, allow_null=True)
+#     mac = serializers.CharField(required=False, label='MAC地址', max_length=12)
+#
+#     class Meta:
+#         fields = '__all__'
+#         model = models.Machine
+#         validators = []
 
-    class Meta:
-        fields = '__all__'
-        model = models.Machine
-        validators = []
 
-
-class ProgramSerializer(serializers.ModelSerializer):
-    machine = MachineSerializer(read_only=True)
-    machine_id = serializers.PrimaryKeyRelatedField(source='machine',
-                                                    queryset=models.Machine.objects.all(), write_only=True)
-    consumer_id = serializers.PrimaryKeyRelatedField(source='consumer',
-                                                     queryset=models.Consumer.objects.all(), write_only=True)
-
-    class Meta:
-        exclude = ('consumer', )
-        model = models.Program
+# class ProgramSerializer(serializers.ModelSerializer):
+#     machine = MachineSerializer(read_only=True)
+#     machine_id = serializers.PrimaryKeyRelatedField(source='machine',
+#                                                     queryset=models.Machine.objects.all(), write_only=True)
+#     consumer_id = serializers.PrimaryKeyRelatedField(source='consumer',
+#                                                      queryset=models.Consumer.objects.all(), write_only=True)
+#
+#     class Meta:
+#         exclude = ('consumer', )
+#         model = models.Program
 
 
 class ConsumerSerializer(serializers.ModelSerializer):
-    program = ProgramSerializer(required=False)
-    source = serializers.IntegerField(required=False, default=ConsumerSource.REPORT)
+    # program = ProgramSerializer(required=False)
+    # source = serializers.IntegerField(required=False, default=ConsumerSource.REPORT)
+    id = serializers.CharField(max_length=36)
 
     class Meta:
         fields = '__all__'
         model = models.Consumer
+        validators = []

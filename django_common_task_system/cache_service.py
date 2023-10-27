@@ -445,7 +445,7 @@ def ensure_server_running():
     except ConnectionRefusedError:
         from multiprocessing import Process, set_start_method
         set_start_method('spawn', force=True)
-        p = Process(target=start_cache_service, daemon=True)
+        p = Process(target=start_cache_service, daemon=False)
         p.start()
 
 

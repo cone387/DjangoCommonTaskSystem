@@ -18,6 +18,7 @@ from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
 from . import models
 from .builtins import builtins
+from .consumer import consumer_manager
 from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
     ScheduleStatus, ExecuteStatus, ConsumerStatus, ContainerStatus
 
@@ -386,7 +387,7 @@ class ProgramAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {
             'fields': (
-                'consumer',
+                'id',
                 ('machine', 'type')
             ),
         }),
@@ -438,24 +439,46 @@ class ProgramAdmin(admin.ModelAdmin):
 
 
 class ConsumerAdmin(admin.ModelAdmin):
-    list_display = ('short_id',
-                    'admin_consume_url',
-                    'program_state',
-                    'status',
-                    'source',
-                    'action', 'create_time')
+    # list_display = ('short_id',
+    #                 'admin_consume_url',
+    #                 'program_state',
+    #                 'status',
+    #                 'source',
+    #                 'action', 'create_time')
     form = forms.ConsumerForm
-    fields = (
-        'program',
-        'consume_url',
-        ('consume_scheme', 'consume_host', 'consume_port'),
-        'custom_consume_url',
-        'consume_kwargs',
-        'settings',
-        'source'
+    fieldsets = (
+        ("订阅配置", {
+            'fields': (
+                "id",
+                ('consume_host',  'consume_queue'),
+                ('consume_scheme', 'consume_port',),
+                'custom_consume_url',
+                'consume_kwargs',
+            ),
+        }),
+        ("容器配置", {
+            'fields': (
+                'container_image',
+                'container_name',
+                'container_id'
+            ),
+            "classes": ("docker-config",)
+        },),
+        ("高级配置", {
+            'fields': (
+                'settings',
+                'env',
+            ),
+            "classes": ("collapse",)
+        }),
+        (None, {
+            'fields': (
+                'active_time',
+            ),
+        }),
     )
-    readonly_fields = ('create_time', 'program')
-    list_filter = ('status', 'source')
+    # readonly_fields = ('create_time', 'program')
+    # list_filter = ('status', 'source')
 
     def short_id(self, obj: models.Consumer):
         return obj.id.hex[0:8]
@@ -518,28 +541,10 @@ class ConsumerAdmin(admin.ModelAdmin):
         )
     action.short_description = '操作'
 
-    # containers_loaded = False
-
-    def load_local_consumers(self, request):
-        # if not self.containers_loaded:
-        ConsumerAdmin.containers_loaded = True
-        try:
-            client = docker.from_env()
-            containers = client.containers.list(all=True, filters={
-                "name": "common-task-system-client",
-                # "ancestor": "common-task-system-client" [common-task-system-client, cone387/common-task-system-client]
-            })
-        except APIError as e:
-            self.message_user(request, '获取客户端异常: %s' % e, level=messages.ERROR)
-        except docker.errors.DockerException:
-            pass
-        else:
-            for container in containers:
-                models.Consumer.load_from_container(container)
-
     def get_queryset(self, request):
-        self.load_local_consumers(request)
-        return models.Consumer.objects.all().select_related('program', 'program__machine')
+        # self.load_local_consumers(request)
+        # return models.Consumer.objects.all().select_related('program', 'program__machine')
+        return consumer_manager.all()
 
 
 class ScheduleFilter(admin.SimpleListFilter):
@@ -834,8 +839,8 @@ admin.site.register(models.ScheduleQueuePermission, ScheduleQueuePermissionAdmin
 admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
 admin.site.register(models.RetrySchedule, RetryScheduleAdmin)
-admin.site.register(models.Machine, MachineAdmin)
-admin.site.register(models.Program, ProgramAdmin)
+# admin.site.register(models.Machine, MachineAdmin)
+# admin.site.register(models.Program, ProgramAdmin)
 admin.site.register(models.Consumer, ConsumerAdmin)
 
 

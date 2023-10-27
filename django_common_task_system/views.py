@@ -98,12 +98,12 @@ def delete_task(sender, instance: Task, **kwargs):
                 os.rmdir(path)
 
 
-@receiver(post_save, sender=models.Program)
-def start_program(sender, instance: models.Program, created, **kwargs):
-    if created:
-        from .consumer import ConsumerProgram
-        program = ConsumerProgram(instance)
-        program.start_if_not_started()
+# @receiver(post_save, sender=models.Program)
+# def start_program(sender, instance: models.Program, created, **kwargs):
+#     if created:
+#         from .consumer import ConsumerProgram
+#         program = ConsumerProgram(instance)
+#         program.start_if_not_started()
     """
         ValueError: signal only works in main thread of the main interpreter
         It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
@@ -112,11 +112,11 @@ def start_program(sender, instance: models.Program, created, **kwargs):
     """
 
 
-@receiver(post_delete, sender=models.Program)
-def stop_program(sender, instance: models.Program, **kwargs):
-    from .consumer import ConsumerProgram
-    program = ConsumerProgram(instance)
-    program.stop()
+# @receiver(post_delete, sender=models.Program)
+# def stop_program(sender, instance: models.Program, **kwargs):
+#     from .consumer import ConsumerProgram
+#     program = ConsumerProgram(instance)
+#     program.stop()
 
 
 # for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
@@ -338,79 +338,7 @@ class ScheduleTimeParseView(APIView):
 
 class UserConsumerView(APIView):
 
-    @staticmethod
-    def create_serializer(request, **kwargs) -> serializers.ConsumerSerializer:
-        serializer = serializers.ConsumerSerializer(data=kwargs)
-        serializer.context['request'] = request
-        serializer.is_valid(raise_exception=True)
-        return serializer
-
-    @staticmethod
-    def get_consumer_and_program(consumer_id: str) -> (Consumer, models.Program):
-        consumer = program = None
-        if consumer_id:
-            try:
-                uuid.UUID(consumer_id).version == 4
-            except ValueError:
-                raise ValidationError('无效的consumer_id: %s' % consumer_id)
-            try:
-                consumer = Consumer.objects.get(pk=consumer_id)
-                program = consumer.program
-            except (Consumer.DoesNotExist, ObjectDoesNotExist):
-                pass
-        return consumer, program
-
-    def get(self, request: Request, action: str):
-        consumer_id = request.GET.get('consumer_id', '')
-        consumer, program = self.get_consumer_and_program(consumer_id)
-        if action == ContainerProgramAction.START:
-            if program is not None:
-                return Response({'error': 'consumer(%s)已经启动' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
-            if consumer is None:
-                consumer = self.create_serializer(request, source=ConsumerSource.API, **request.data).save()
-            program = models.Program.objects.create(consumer=consumer)
-            program.save()
-            return Response(serializers.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
-        if consumer is None:
-            raise NotFound('Consumer(%s)不存在' % consumer_id)
-        if action == ContainerProgramAction.STOP:
-            if program is not None:
-                program.delete()
-            return Response(serializers.ConsumerSerializer(consumer).data, status=status.HTTP_202_ACCEPTED)
-        elif action == ContainerProgramAction.LOG:
-            if program is None:
-                raise NotFound('Consumer(%s)未启动' % consumer_id)
-            program = ConsumerProgram(program)
-            return HttpResponse(program.read_log(), content_type='text/plain; charset=utf-8')
-        else:
-            return Response({'error': 'invalid action: %s, only support start/stop/log' % action},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-    def post(self, request: Request, action: str):
-        if action == 'register':
-            data = dict(request.data)
-            machine = data.pop('machine', {})
-            if not isinstance(machine, dict):
-                return Response({'error': 'machine is required'}, status=status.HTTP_400_BAD_REQUEST)
-            machine['internet_ip'] = request.META.get('REMOTE_ADDR')
-            serializer = serializers.MachineSerializer(data=machine)
-            serializer.is_valid(raise_exception=True)
-            try:
-                machine = serializer.save()
-            except IntegrityError:
-                machine = models.Machine.objects.get(**machine)
-            data['machine_id'] = machine.mac
-
-            consumer = data.pop('consumer', {})
-            consumer = self.create_serializer(request, source=ConsumerSource.REPORT, **consumer).save()
-            data['consumer_id'] = consumer.id
-            serializer = serializers.ProgramSerializer(data=data)
-            serializer.is_valid(raise_exception=True)
-            serializer.save()
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        else:
-            return Response({'error': 'invalid action: %s, only support start/register' % action},
-                            status=status.HTTP_400_BAD_REQUEST)
+    pass
 
 
 def log_view(request: Request, filename):

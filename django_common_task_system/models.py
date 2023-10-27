@@ -13,10 +13,10 @@ from django.core.validators import ValidationError
 from django_common_task_system.schedule.config import ScheduleConfig
 from django_common_task_system.utils import foreign_key
 from django_common_task_system.schedule import util as schedule_util
+from django_common_task_system.utils import ip as ip_utils
 from django.utils import timezone
 from functools import cmp_to_key
-from django_common_task_system.utils import ip as ip_util
-from docker.models.containers import Container
+from collections import namedtuple
 import uuid
 import re
 
@@ -349,100 +349,39 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
-def get_mac_address():
-    import uuid
-    node = uuid.getnode()
-    mac = uuid.UUID(int=node).hex[-12:]
-    return mac
-
-
-def get_hostname():
-    import socket
-    return socket.gethostname()
-
-
-class Machine(models.Model):
-    mac = models.CharField(max_length=12, verbose_name='MAC地址', primary_key=True)
-    hostname = models.CharField(max_length=100, verbose_name='机器名')
-    intranet_ip = models.GenericIPAddressField(max_length=100, verbose_name='内网IP')
-    internet_ip = models.GenericIPAddressField(max_length=100, verbose_name='外网IP')
-    group = models.CharField(max_length=100, verbose_name='分组', default='默认')
-    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
-
-    @staticmethod
-    def local():
-        mac = get_mac_address()
-        local = Machine.objects.filter(mac=mac).first()
-        if not local:
-            local = Machine.objects.create(
-                mac=mac,
-                hostname=get_hostname(),
-                intranet_ip=ip_util.get_intranet_ip(),
-                internet_ip=ip_util.get_internet_ip(),
-            )
-        return local
-
-    @property
-    def localhost_ip(self):
-        return "127.0.0.1"
-
-    class Meta:
-        db_table = 'consumer_machine'
-        verbose_name = verbose_name_plural = '机器管理'
-        ordering = ('-create_time',)
-
-    def __str__(self):
-        return "%s(%s)" % (self.hostname, self.intranet_ip)
+Machine = namedtuple('Machine', ('mac', 'hostname', 'internet_ip', 'intranet_ip'))
+current_machine = Machine(
+    mac=ip_utils.get_mac_address(),
+    hostname=ip_utils.get_hostname(),
+    internet_ip=ip_utils.get_internet_ip(),
+    intranet_ip=ip_utils.get_intranet_ip()
+)
 
 
 class Consumer(models.Model):
     id = models.UUIDField(primary_key=True, verbose_name='ID', default=uuid.uuid4)
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
     consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
-    source = models.IntegerField(verbose_name='消费来源', default=ConsumerSource.REPORT, choices=ConsumerSource.choices)
-    status = models.IntegerField(choices=ConsumerStatus.choices, verbose_name='状态', default=ConsumerStatus.CREATED)
-    settings = models.JSONField(verbose_name='消费端设置', null=True, blank=True)
-    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
-    update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    machine = models.JSONField(verbose_name='机器信息')
+    process_id = models.IntegerField(verbose_name='进程ID', default=0)
+    container = models.JSONField(verbose_name='容器信息', null=True, blank=True, default=dict)
+    error = models.TextField(verbose_name='错误信息', null=True, blank=True)
+    active_time = models.DateTimeField(default=timezone.now, verbose_name='活跃时间')
+
+    objects = CustomManager()
 
     class Meta:
+        managed = False
         verbose_name = verbose_name_plural = '消费端管理'
-        db_table = 'schedule_consumer'
-        ordering = ('-create_time',)
+        ordering = ('-active_time',)
 
     def __str__(self):
         return str(self.id)
 
-
-class Program(models.Model):
-    id = models.AutoField(primary_key=True, verbose_name='ID')
-    consumer = models.OneToOneField(Consumer, on_delete=models.CASCADE, db_constraint=False, verbose_name='消费端',
-                                    related_name='program')
-    machine = models.ForeignKey(Machine, on_delete=models.DO_NOTHING, db_constraint=False, verbose_name='机器')
-    name = models.CharField(max_length=100, verbose_name='程序名', default="consumer")
-    type = models.IntegerField(verbose_name='程序类型', choices=ProgramType.choices, default=ProgramType.DOCKER)
-    is_running = models.BooleanField(verbose_name='运行状态', default=False)
-    process_id = models.IntegerField(verbose_name='进程ID', default=0)
-    container = models.JSONField(verbose_name='容器信息', null=True, blank=True, default=dict)
-    settings = models.JSONField(verbose_name='设置', null=True, blank=True, default=dict)
-    env = models.CharField(max_length=500, verbose_name='环境变量', blank=True, null=True)
-    startup_log = models.TextField(null=True, blank=True)
-    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
-
-    class Meta:
-        verbose_name = verbose_name_plural = '程序管理'
-        db_table = 'consumer_program'
-        ordering = ('-create_time',)
-
-    def __str__(self):
-        return "Program(machine=%s, process=%s)" % (self.machine, self.process_id)
-
     def save(
         self, force_insert=False, force_update=False, using=None, update_fields=None
     ):
-        if self.machine_id is None:
-            self.machine = Machine.local()
-        super().save(force_insert, force_update, using, update_fields)
+        pass
 
 
 class ExceptionScheduleManager(CustomManager):

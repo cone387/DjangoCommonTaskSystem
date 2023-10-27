@@ -1,7 +1,7 @@
 
 import inspect
 import os
-import re
+import uuid
 from django import forms
 from django.conf import settings
 from django.contrib.admin import widgets
@@ -13,16 +13,14 @@ from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
 from .schedule.config import ScheduleConfig
 from django.urls import reverse
-from django_common_task_system.utils import ip as ip_utils
 from urllib.parse import urljoin
-from django_common_task_system.utils.cache import ttl_cache
-from .choices import ProgramType
 from . import models
 from . import get_schedule_model, get_task_model
 from .fields import (NLPSentenceWidget, PeriodScheduleFiled, OnceScheduleField, MultiWeekdaySelectFiled,
                      MultiMonthdaySelectFiled, MultiYearDaySelectWidget, MultiDaySelectField, PeriodWidget,
                      SqlConfigField, CustomProgramField)
 from .utils.algorithm import get_md5
+from .consumer import ConsumerProgram, ConsumerContainer
 
 TaskModel = get_task_model()
 ScheduleModel = get_schedule_model()
@@ -371,11 +369,12 @@ SETTINGS_TEMPLATE = """
 
 
 class ConsumerForm(forms.ModelForm):
-    source = forms.CharField(initial=ConsumerSource.ADMIN.value, widget=forms.HiddenInput())
+    id = forms.CharField(max_length=100, label='订阅ID', widget=forms.HiddenInput())
     consume_url = forms.ChoiceField(label='订阅地址', required=False)
     consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
     consume_host = forms.ChoiceField(label='订阅Host')
     consume_port = forms.IntegerField(label='订阅Port', initial=80, min_value=1, max_value=65535)
+    consume_queue = forms.ChoiceField(label="队列")
     custom_consume_url = forms.CharField(
         max_length=300, label='自定义订阅地址', widget=forms.TextInput(
             attrs={'style': 'width: 60%;', 'placeholder': 'http://127.0.0.1:8000/schedule/consume/'}),
@@ -385,6 +384,20 @@ class ConsumerForm(forms.ModelForm):
         attrs={'rows': 1, 'style': 'width: 60%;',
                'placeholder': '{"queue": "test", "command": "select * from table limit 1"}'}
     ), required=False)
+    process_id = forms.IntegerField(label="进程ID", widget=ReadOnlyWidget(), required=False)
+    container_id = forms.CharField(max_length=100, label='容器ID', widget=ReadOnlyWidget(), required=False)
+    container_image = forms.CharField(max_length=100, label='Docker镜像', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': ConsumerContainer.default_image}
+    ), required=False)
+    container_name = forms.CharField(max_length=100, label='容器名', widget=forms.TextInput(
+        attrs={'style': 'width: 60%;', 'placeholder': ConsumerContainer.default_name}
+    ), required=False)
+    env = forms.CharField(
+        label='环境变量',
+        max_length=500,
+        initial='DJANGO_SETTINGS_MODULE=%s' % os.environ.get('DJANGO_SETTINGS_MODULE'),
+        widget=forms.Textarea(attrs={'style': 'width: 60%;', "cols": "40", "rows": "5"}),
+    )
     settings = forms.CharField(
         label='配置',
         max_length=5000,
@@ -401,14 +414,15 @@ class ConsumerForm(forms.ModelForm):
             path = reverse('schedule-get', kwargs={'code': obj.code})
             consume_url_choices.append((path, obj.name))
         self.fields['consume_url'].choices = consume_url_choices
-        local = models.Machine.local()
-        ip_choices = [(local.localhost_ip, '%s(%s)' % (local.localhost_ip, local.hostname))]
-        for machine in models.Machine.objects.all():
-            ip_choices.append((machine.intranet_ip, "%s(%s)内网" % (machine.intranet_ip, machine.hostname)))
-            ip_choices.append((machine.internet_ip, "%s(%s)外网" % (machine.internet_ip, machine.hostname)))
-        self.fields['consume_host'].choices = ip_choices
-        # self.initial['machine'] = models.Machine.objects.local
-        # self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
+        machine = models.current_machine
+        self.fields['consume_host'].choices = [
+            (machine.internet_ip, "外网IP(%s)" % machine.internet_ip),
+            (machine.intranet_ip, "内网IP(%s)" % machine.intranet_ip),
+        ]
+        self.fields['consume_queue'].choices = models.ScheduleQueue.objects.filter(status=True
+                                                                                   ).values_list('code', 'name')
+        self.initial['id'] = str(uuid.uuid4())
+        self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
     def validate_setting(setting_str, setting_dict):
@@ -421,19 +435,34 @@ class ConsumerForm(forms.ModelForm):
         cleaned_data = super(ConsumerForm, self).clean()
         if self.errors:
             return cleaned_data
+        cleaned_data['machine'] = models.current_machine
         consume_url = cleaned_data.get('custom_consume_url') or urljoin(
-            "%s://%s:%s" % (cleaned_data.get('consume_scheme'),
-                            cleaned_data.get('consume_host'),
-                            cleaned_data.get('consume_port')), cleaned_data.get('consume_url'))
+            "%s://%s:%s/schedule/queue/get/" % (
+                cleaned_data['consume_scheme'], cleaned_data['consume_host'], cleaned_data['consume_port']),
+            cleaned_data.get('consume_queue')
+        )
         consume_kwargs = cleaned_data.get('consume_kwargs')
         if consume_url.startswith('redis'):
             if not consume_kwargs.get('queue'):
                 raise forms.ValidationError('queue is required for redis consume')
-        if consume_url.startswith('mysql'):
+        elif consume_url.startswith('mysql'):
             if not consume_kwargs.get('command'):
                 raise forms.ValidationError('command is required for mysql consume')
+        elif not consume_url.startswith('http'):
+            raise forms.ValidationError('consume url scheme must be http, https, redis or mysql')
+        self.instance.container = {
+            'image': cleaned_data.get('container_image'),
+            'name': cleaned_data.get('container_name'),
+            'id': cleaned_data.get('container_id'),
+        }
         self.validate_setting(cleaned_data['settings'], {})
+        self.instance.consume_url = consume_url
+        self.instance.machine = models.current_machine._asdict()
+        ConsumerProgram(self.instance).start_if_not_started()
         return cleaned_data
+
+    def validate_unique(self):
+        pass
 
     class Meta:
         model = models.Consumer
