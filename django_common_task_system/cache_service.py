@@ -244,6 +244,14 @@ def _get(key: str):
     return _cache_mapping.get(key)
 
 
+def _incr(key, amount=1):
+    value = _cache_mapping.get(key)
+    if value is None:
+        value = 0
+    _cache_mapping[key] = TTLString(int(value) + amount)
+    return value
+
+
 def _mset(data: str, expire: int = 0):
     mapping = json.loads(data)
     for k, v in mapping.items():
@@ -288,6 +296,28 @@ def _hdel(name, key):
     return hmap.pop(key, None)
 
 
+def _exists(key):
+    return 1 if key in _cache_mapping else 0
+
+
+def _hexists(name, key):
+    hmap = _cache_mapping.get(name)
+    if hmap is None:
+        return 0
+    if not isinstance(hmap, dict):
+        raise Exception("key %s is not a map, use get instead" % name)
+    return 1 if key in hmap else 0
+
+
+def _hincrby(name, key, amount=1):
+    hmap = _cache_mapping.get(name)
+    if hmap is None:
+        return None
+    value = hmap.get(key, 0)
+    hmap[key] = value + amount
+    return value
+
+
 _available_commands = {
     'list': _list,
     'pop': _pop,
@@ -300,11 +330,15 @@ _available_commands = {
     'llen': _llen,
     'set': _set,
     'get': _get,
+    'exists': _exists,
     'mset': _mset,
     'hset': _hset,
     'hget': _hget,
     'hgetall': _hgetall,
     'hdel': _hdel,
+    'hexists': _hexists,
+    'incr': _incr,
+    'hincrby': _hincrby,
     # 'LINDEX': lambda: HttpResponse(''),
 }
 
@@ -516,6 +550,9 @@ class CacheAgent:
     def get(self, key):
         return self.execute('get', key)
 
+    def exists(self, key):
+        return bool(int(self.execute('exists', key)))
+
     def delete(self, key):
         return self.execute('delete', key)
 
@@ -559,6 +596,9 @@ class CacheAgent:
 
     def hdel(self, name, key):
         return self.execute('hdel', name, key)
+
+    def hexists(self, name, key):
+        return bool(int(self.execute('hexists', name, key)))
 
     def ping(self):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

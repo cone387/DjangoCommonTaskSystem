@@ -13,7 +13,7 @@ class CustomProgramWidget(forms.MultiWidget):
                                                    'placeholder': '例如: -a 1 -b 2'})
         container_image = widgets.AdminTextInputWidget(
             attrs={'style': 'margin-top: 1px; ', 'placeholder': 'common-task-system-client:latest'})
-        run_in_container = forms.CheckboxInput()
+        run_in_container = forms.CheckboxInput(attrs={'checked': 'checked'})
         super().__init__([file, args, container_image, run_in_container], attrs=attrs)
 
     def decompress(self, value):
@@ -27,13 +27,13 @@ class CustomProgramField(forms.MultiValueField):
 
     def __init__(self, required=False, label="可执行文件", initial=None, **kwargs):
         if initial is None:
-            initial = [None, None, None, False]
+            initial = [None, None, None, True]
         a, b, c, d = initial
         fs = (
             forms.FileField(help_text='仅支持zip、python、shell格式', required=False, initial=a),
             forms.CharField(help_text='例如: -a 1 -b 2', required=False, initial=b),
             forms.CharField(help_text='Docker镜像', required=False, initial=c),
-            forms.BooleanField(label="在Docker中运行", help_text='在Docker中运行', initial=d),
+            forms.BooleanField(label="在容器中运行", help_text='在容器中运行', initial=d),
         )
         super(CustomProgramField, self).__init__(fs, required=required, label=label, **kwargs)
 

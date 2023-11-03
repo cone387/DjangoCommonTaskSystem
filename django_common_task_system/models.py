@@ -324,6 +324,11 @@ class QuerySet(list):
     def _clone(self):
         return self
 
+    def create(self, **kwargs):
+        obj = self.model(**kwargs)
+        obj.save()
+        return obj
+
 
 class CustomManager(models.Manager, dict):
 
@@ -349,31 +354,49 @@ class CustomManager(models.Manager, dict):
         return self._meta.managers_map[self.manager.name]
 
 
-Machine = namedtuple('Machine', ('mac', 'hostname', 'internet_ip', 'intranet_ip'))
+Machine = namedtuple('Machine', ('mac', 'hostname', 'internet_ip', 'intranet_ip', 'group'))
 current_machine = Machine(
     mac=ip_utils.get_mac_address(),
     hostname=ip_utils.get_hostname(),
     internet_ip=ip_utils.get_internet_ip(),
-    intranet_ip=ip_utils.get_intranet_ip()
+    intranet_ip=ip_utils.get_intranet_ip(),
+    group='默认'
 )
 
 
+Container = namedtuple('Container', ('id', 'name', 'image'))
+
+
 class Consumer(models.Model):
-    id = models.UUIDField(primary_key=True, verbose_name='ID', default=uuid.uuid4)
+    id = models.CharField(primary_key=True, verbose_name='ID', max_length=36)
+    queue = models.CharField(max_length=100, verbose_name='队列')
     consume_url = models.CharField(max_length=200, verbose_name='订阅地址')
     consume_kwargs = models.JSONField(verbose_name='订阅参数', default=dict)
     machine = models.JSONField(verbose_name='机器信息')
     process_id = models.IntegerField(verbose_name='进程ID', default=0)
     container = models.JSONField(verbose_name='容器信息', null=True, blank=True, default=dict)
     error = models.TextField(verbose_name='错误信息', null=True, blank=True)
-    active_time = models.DateTimeField(default=timezone.now, verbose_name='活跃时间')
+    settings = models.TextField(verbose_name='配置', null=True, blank=True)
+    create_time = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
 
     objects = CustomManager()
+
+    def to_json(self):
+        return {
+            'id': self.id,
+            'consume_url': self.consume_url,
+            'consume_kwargs': self.consume_kwargs,
+            'machine': self.machine,
+            'process_id': self.process_id,
+            'container': self.container,
+            'error': self.error,
+            'create_time': self.create_time,
+        }
 
     class Meta:
         managed = False
         verbose_name = verbose_name_plural = '消费端管理'
-        ordering = ('-active_time',)
+        ordering = ('-create_time',)
 
     def __str__(self):
         return str(self.id)

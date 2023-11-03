@@ -13,7 +13,7 @@ from django_common_task_system.permissions import ConsumerPermissionValidator
 from . import get_task_model, get_schedule_model, get_schedule_log_model, system_initialized_signal
 
 TaskModel = get_task_model()
-ScheduleModel: Schedule = get_schedule_model()
+ScheduleModel = get_schedule_model()
 ScheduleLogModel = get_schedule_log_model()
 
 
@@ -73,6 +73,10 @@ class Categories(BuiltinModels):
 
         self.system_test = self.model(
             name='系统测试',
+            model=model,
+        )
+        self.normal = self.model(
+            name='普通任务',
             model=model,
         )
         super(Categories, self).__init__()
@@ -299,7 +303,7 @@ class Tasks(BuiltinModels):
             },
         )
 
-        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../static/custom_programs'))
+        executable_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'static/custom_programs'))
         self.test_python_custom_program = self.model(
             name='测试自定义Python程序执行任务',
             parent=self.custom_program,
@@ -455,5 +459,26 @@ class Builtins:
                 Timer(2, function=system_initialized_signal.send, args=('system_initialized', )).start()
 
 
+class SignalSchedule:
+
+    def __init__(self):
+        self._register_task = TaskModel(id=-1, name="系统信号", category=builtins.categories.system_task, config={
+            "signal": "register"
+        })
+        self.register_consumer = ScheduleModel(id=-1, task=self._register_task, preserve_log=False)
+
+        self._stop_task = TaskModel(id=-2, name="系统信号", category=builtins.categories.system_task, config={
+            "signal": "stop"
+        })
+        self.stop_consumer = ScheduleModel(id=-2, task=self._stop_task, preserve_log=False)
+
+        self._log_task = TaskModel(id=-3, name="系统信号", category=builtins.categories.system_task, config={
+            "signal": "log"
+        })
+        self.log_consumer = ScheduleModel(id=-3, task=self._log_task, preserve_log=False)
+
+
 builtins = Builtins()
 builtins.initialize()
+
+signal_schedule = SignalSchedule()

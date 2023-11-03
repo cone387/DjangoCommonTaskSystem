@@ -6,7 +6,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import connection, IntegrityError
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 from django_common_objects.models import CommonCategory
 from jionlp_time import parse_time
@@ -26,16 +27,14 @@ from django_common_task_system.schedule import util as schedule_util
 from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.program import ProgramAction, ProgramAgent, ContainerProgramAction
-from .choices import ConsumerStatus, ScheduleStatus, ConsumerSource
-from .models import Consumer
-from .builtins import builtins
+from .choices import ConsumerStatus, ScheduleStatus, ConsumerSource, TaskStatus
+from .consumer import consumer_manager
+from .builtins import builtins, signal_schedule
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
 from .log import PagedLog
-from .consumer import consume, ConsumerProgram, ConsumerState
 from typing import List, Dict, Union
 import os
-import json
 
 
 User = models.UserModel
@@ -43,12 +42,6 @@ Task: models.Task = get_task_model()
 Schedule: models.Schedule = get_schedule_model()
 ScheduleLog: models.ScheduleLog = get_schedule_log_model()
 ScheduleSerializer = get_schedule_serializer()
-
-
-# @receiver(system_initialized_signal, sender='system_initialized')
-# def on_system_initialized(sender, **kwargs):
-#     schedule_client.start_system_process()
-#     schedule_client.start_schedule_thread()
 
 
 def on_system_shutdown(signum, frame):
@@ -98,30 +91,16 @@ def delete_task(sender, instance: Task, **kwargs):
                 os.rmdir(path)
 
 
-# @receiver(post_save, sender=models.Program)
-# def start_program(sender, instance: models.Program, created, **kwargs):
-#     if created:
-#         from .consumer import ConsumerProgram
-#         program = ConsumerProgram(instance)
-#         program.start_if_not_started()
-    """
-        ValueError: signal only works in main thread of the main interpreter
-        It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
-        development server in single-threaded mode:
-        $ python manage.py  runserver --nothreading --noreload
-    """
-
-
-# @receiver(post_delete, sender=models.Program)
-# def stop_program(sender, instance: models.Program, **kwargs):
-#     from .consumer import ConsumerProgram
-#     program = ConsumerProgram(instance)
-#     program.stop()
-
-
-# for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
-#     if sig is not None:
-#         signal.signal(sig, on_system_shutdown)
+"""
+    ValueError: signal only works in main thread of the main interpreter
+    It's a known issue but apparently not documented anywhere. Sorry about that. The workaround is to run the 
+    development server in single-threaded mode:
+    $ python manage.py  runserver --nothreading --noreload
+    
+    for sig in [signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGQUIT', None), getattr(signal, 'SIGHUP', None)]:
+        if sig is not None:
+            signal.signal(sig, on_system_shutdown)
+"""
 
 
 def retry_from_log_ids(log_ids: List[int]):
@@ -170,18 +149,43 @@ def put_schedules(records: ScheduleRecord):
     return result
 
 
+def get_consumer_or_404(consumer_id: str):
+    if not consumer_id:
+        raise NotFound('id(consumer id) is required')
+    consumer = consumer_manager.get(consumer_id)
+    if consumer is None:
+        raise NotFound('consumer(%s)不存在' % consumer_id)
+    return consumer
+
+
 class ScheduleAPI:
+
+    @staticmethod
+    @api_view(['POST'])
+    def register_consumer(request: Request):
+        serializer = serializers.ConsumerSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        consumer = consumer_manager.create(serializer.save())
+        return Response(serializers.ConsumerSerializer(consumer).data)
 
     @staticmethod
     @api_view(['GET'])
     def get(request: Request, code: str):
-        """"
-            获取任务时，code参数为队列名称, 另外会传入consumer_id参数, 用于支持指定消费者
         """
-        try:
-            state = ConsumerState.from_str(request.query_params.get('consumer', ''))
-        except Exception as e:
-            return Response({'error': f'consumer参数格式错误: {e}'}, status=status.HTTP_400_BAD_REQUEST)
+            获取任务时，code参数为队列名称, 另外会传入consumer_id参数, 用于支持指定消费者
+            必须传入consumer_id, 如果不存在则先注册
+        """
+        consumer_id = request.query_params.get('id')
+        if not consumer_id:
+            return Response({'error': 'id(consumer id) is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if not consumer_manager.exists(consumer_id):
+            if consumer_manager.in_waitlist(consumer_id):
+                return Response({'error': '等待(%s)注册完成' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
+            # 返回一个注册的任务
+            data = ScheduleSerializer(signal_schedule.register_consumer).data
+            data['queue'] = code
+            consumer_manager.join_waitlist(consumer_id)
+            return Response(data)
         instance = builtins.schedule_queues.get(code, None)
         if instance is None:
             return Response({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
@@ -197,7 +201,7 @@ class ScheduleAPI:
         except Exception as e:
             return Response({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         finally:
-            state.push()
+            consumer_manager.heartbeat(consumer_id)
         return Response(schedule)
 
     @staticmethod
@@ -338,7 +342,48 @@ class ScheduleTimeParseView(APIView):
 
 class UserConsumerView(APIView):
 
-    pass
+    def get(self, request, action):
+        consumer = get_consumer_or_404(request.query_params.get('id'))
+        if action == 'log':
+            log = consumer_manager.read_log(consumer.id)
+            return HttpResponse(log, content_type='text/plain')
+        raise ValidationError('invalid action: %s' % action)
+
+    def post(self, request: Request, action):
+        consumer = get_consumer_or_404(request.query_params.get('id'))
+        if action == 'stop':
+            data = consumer_manager.delete(consumer.id)
+            return Response(data)
+        elif action == 'log':
+            consumer_manager.write_log(consumer.id, request.data['log'])
+            return Response({
+                "message": "OK",
+                "size": len(request.data['log'])
+            })
+        else:
+            return Response({'error': 'invalid action: %s' % action}, status=status.HTTP_400_BAD_REQUEST)
+
+    @staticmethod
+    @api_view(['GET'])
+    def send_signal(request, signal):
+        consumer = get_consumer_or_404(request.query_params.get('id'))
+        queue = builtins.schedule_queues.get(consumer.queue)
+        if queue is None:
+            return Response({'error': 'queue(%s)不存在' % consumer.queue}, status=status.HTTP_404_NOT_FOUND)
+        if signal == 'stop':
+            data = ScheduleSerializer(signal_schedule.stop_consumer).data
+            data['queue'] = consumer.queue
+            queue.queue.put(data)
+            return Response(data)
+        elif signal == 'log':
+            data = ScheduleSerializer(signal_schedule.log_consumer).data
+            data['queue'] = consumer.queue
+            queue.queue.put(data)
+            if request.query_params.get('admin') == '1':
+                url = reverse('user-consumer-action', args=('log', )) + '?id=%s' % consumer.id
+                return redirect(url)
+            return Response(data)
+        raise ValidationError('invalid signal: %s' % signal)
 
 
 def log_view(request: Request, filename):
@@ -352,6 +397,27 @@ def log_view(request: Request, filename):
             'logs': paged_log.read_page(int(page)).split('\n'),
         })
     return Response({'error': f'invalid page({page}) or page_size({page_size})'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ProgramDownloadView(APIView):
+    def get(self, request, task_id):
+        try:
+            task = Task.objects.get(id=task_id, status=TaskStatus.ENABLE)
+        except ObjectDoesNotExist:
+            return Response({'error': 'task(%s)不存在' % task_id}, status=status.HTTP_404_NOT_FOUND)
+        if task.parent != builtins.tasks.custom_program:
+            return Response({'error': 'task(%s)不是自定义程序' % task_id}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            executable = task.config['custom_program']['executable']
+        except KeyError:
+            return Response({'error': f'任务配置异常：%s' % task.config}, status=status.HTTP_400_BAD_REQUEST)
+        if not os.path.exists(executable):
+            return Response({'error': 'task程序(%s)不存在' % executable}, status=status.HTTP_400_BAD_REQUEST)
+        with open(executable, 'rb') as f:
+            response = HttpResponse(f.read())
+            response['Content-Type'] = 'application/octet-stream'
+            response['Content-Disposition'] = 'attachment;filename="%s"' % os.path.basename(executable)
+            return response
 
 
 class ProgramViewMixin:

@@ -6,7 +6,7 @@ from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.db.models import Count
-from datetime import datetime
+from datetime import datetime, timedelta
 from docker.errors import APIError
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
@@ -383,68 +383,12 @@ class MachineAdmin(admin.ModelAdmin):
     list_display = ('mac', 'hostname', 'intranet_ip', 'internet_ip')
 
 
-class ProgramAdmin(admin.ModelAdmin):
-    fieldsets = (
-        (None, {
-            'fields': (
-                'id',
-                ('machine', 'type')
-            ),
-        }),
-        ("容器配置", {
-                'fields': (
-                    'container_image',
-                    'container_name',
-                    'container_id'
-                ),
-                "classes": ("docker-config", )
-            },),
-        ("进程配置", {
-            'fields': (
-                'process_id',
-            ),
-            "classes": ("process-config",)
-        },),
-        ("高级配置", {
-            'fields': (
-                'settings',
-                'env',
-            ),
-            "classes": ("collapse", )
-        }),
-        (None, {
-            'fields': (
-                'create_time',
-            ),
-        }),
-    )
-    list_display = ('id', 'machine', 'name', 'type', 'is_running', 'create_time')
-    readonly_fields = ("create_time", "process_id")
-    form = forms.ProgramForm
-
-    # def has_add_permission(self, request):
-    #     return False
-    #
-    # def has_change_permission(self, request, obj=None):
-    #     return False
-    #
-    # def has_delete_permission(self, request, obj=None):
-    #     return False
-
-    class Media:
-        js = (
-            'https://cdn.bootcss.com/jquery/3.3.1/jquery.min.js',
-            'common_task_system/js/task_client_admin.js',
-        )
-
-
 class ConsumerAdmin(admin.ModelAdmin):
-    # list_display = ('short_id',
-    #                 'admin_consume_url',
-    #                 'program_state',
-    #                 'status',
-    #                 'source',
-    #                 'action', 'create_time')
+    list_display = ('short_id',
+                    'admin_consume_url',
+                    'admin_machine',
+                    'program_state',
+                    'signal', 'active_time', 'create_time')
     form = forms.ConsumerForm
     fieldsets = (
         ("订阅配置", {
@@ -473,78 +417,87 @@ class ConsumerAdmin(admin.ModelAdmin):
         }),
         (None, {
             'fields': (
-                'active_time',
+                'create_time',
             ),
         }),
     )
-    # readonly_fields = ('create_time', 'program')
+    readonly_fields = ('create_time', 'process_id')
     # list_filter = ('status', 'source')
 
     def short_id(self, obj: models.Consumer):
-        return obj.id.hex[0:8]
+        return obj.id[0:8]
     short_id.short_description = 'ID'
+
+    def active_time(self, obj: models.Consumer):
+        return consumer_manager.get_heartbeat(obj.id)
+    active_time.short_description = '活跃时间'
+
+    def status(self, obj: models.Consumer):
+        active_time = self.active_time(obj)
+        if active_time and datetime.now() - datetime.strptime(active_time, '%Y-%m-%d %H:%M:%S') > timedelta(minutes=3):
+            text, level = '异常(心跳超时(3分钟))', 'warning'
+        elif active_time:
+            text, level = '正常', 'success'
+        else:
+            text, level = '异常(没有心跳)', 'error'
+        return format_html(
+            '<span class="badge badge-%s">%s</span>' % (level, text)
+        )
+
+    status.short_description = '状态'
+
+    def admin_machine(self, obj: models.Consumer):
+        states = [
+            '<b>主机: </b>%s' % obj.machine['hostname'],
+            '<b>内网IP: </b>%s' % obj.machine['intranet_ip'],
+            '<b>外网IP: </b>%s' % obj.machine['internet_ip'],
+        ]
+        return format_html('<span style="line-height: 1">%s</span>' % '<br>'.join(states))
+    admin_machine.short_description = "机器"
 
     def program_state(self, obj: models.Consumer):
         states = [
-            '<b>Machine</b>: <a href="/admin/%s/%s/%s/change/">%s</a>' % (
-                models.Machine._meta.app_label, models.Machine._meta.model_name,
-                obj.program.machine.mac, obj.program.machine
+            '<b>Process: </b>%s' % (
+                obj.process_id
             ),
-            '<b>Process</b>: <a href="/admin/%s/%s/%s/change/">%s</a>' % (
-                models.Program._meta.app_label, models.Program._meta.model_name,
-                obj.program.id, obj.program.process_id
-            ),
-            '<b>Container</b>: %s' % (obj.program.container if obj.program.container else '-'),
-            '<b>Status</b>: %s' % ('<span style="color: green">Running</span>'
-                                   if obj.program.is_running else '<span style="color: red">Stopped</span>'),
+            '<b>Container:</b>',
+            *([f"<b>-{x.capitalize()}：</b> {obj.container[x]}" for x in ['id', 'name', 'image']]
+              if obj.container else [])
         ]
         return format_html('<span style="line-height: 1">%s</span>' % '<br>'.join(states))
 
     program_state.short_description = '程序'
-
-    # def program_status(self, obj: models.Consumer):
-    #     return obj.program and obj.program.is_running
-    # program_status.short_description = '程序状态'
-    # program_status.boolean = True
 
     def admin_consume_url(self, obj: models.Consumer):
         url = urlparse(obj.consume_url)
         try:
             return format_html(
                 '<a href="%s" target="_blank">%s</a>' % (
-                    obj.consume_url, url.path
+                    obj.consume_url + "?id=%s" % obj.id, url.path
                 )
             )
         except Exception as e:
             return str(e)
     admin_consume_url.short_description = '消费地址'
 
-    def action(self, obj: models.Consumer):
-        start_url = reverse('user-consumer-action', args=('start',)) + '?consumer_id=%s' % obj.pk
-        stop_url = reverse('user-consumer-action', args=('stop',)) + '?consumer_id=%s' % obj.pk
-        log_url = reverse('user-consumer-action', args=('log',)) + '?consumer_id=%s' % obj.pk
-        start_action = '<a href="%s" target="_blank">运行</a>' % start_url
-        stop_action = '<a href="%s" target="_blank">停止</a>' % stop_url
-        log_action = '<a href="%s" target="_blank">日志</a>' % log_url
-        try:
-            program = obj.program
-        except ObjectDoesNotExist:
-            program = None
-        if program is None:
-            actions = [start_action]
-        elif program.is_running:
-            actions = [stop_action, log_action]
-        else:
-            actions = [stop_action, log_action]
+    def signal(self, obj: models.Consumer):
+        start_url = reverse('user-consumer-signal', args=('start',)) + '?id=%s' % obj.pk
+        stop_url = reverse('user-consumer-signal', args=('stop',)) + '?id=%s' % obj.pk
+        log_url = reverse('user-consumer-signal', args=('log',),) + '?id=%s&admin=1' % obj.pk
+        start_signal = '<a href="%s" target="_blank">运行</a>' % start_url
+        stop_signal = '<a href="%s" target="_blank">停止</a>' % stop_url
+        log_signal = '<a href="%s" target="_blank">日志</a>' % log_url
+        signals = [stop_signal, log_signal]
         return format_html(
-            '<span style="line-height: 1">%s</span>' % " | ".join(actions)
+            '<span style="line-height: 1">%s</span>' % " | ".join(signals)
         )
-    action.short_description = '操作'
+    signal.short_description = '操作'
 
     def get_queryset(self, request):
-        # self.load_local_consumers(request)
-        # return models.Consumer.objects.all().select_related('program', 'program__machine')
         return consumer_manager.all()
+
+    def get_object(self, request, object_id, from_field=None):
+        return consumer_manager.get(object_id)
 
 
 class ScheduleFilter(admin.SimpleListFilter):
@@ -840,7 +793,6 @@ admin.site.register(models.ExceptionReport, ExceptionReportAdmin)
 admin.site.register(models.ExceptionSchedule, ExceptionScheduleAdmin)
 admin.site.register(models.RetrySchedule, RetryScheduleAdmin)
 # admin.site.register(models.Machine, MachineAdmin)
-# admin.site.register(models.Program, ProgramAdmin)
 admin.site.register(models.Consumer, ConsumerAdmin)
 
 

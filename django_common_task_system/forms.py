@@ -1,4 +1,4 @@
-
+import builtins
 import inspect
 import os
 import uuid
@@ -21,6 +21,7 @@ from .fields import (NLPSentenceWidget, PeriodScheduleFiled, OnceScheduleField, 
                      SqlConfigField, CustomProgramField)
 from .utils.algorithm import get_md5
 from .consumer import ConsumerProgram, ConsumerContainer
+from .builtins import builtins
 
 TaskModel = get_task_model()
 ScheduleModel = get_schedule_model()
@@ -85,7 +86,7 @@ class TaskForm(forms.ModelForm):
                     InitialFileStr(custom_program.get('executable', '').replace(self.executable_path, '')),
                     custom_program.get('args'),
                     custom_program.get('docker_image'),
-                    custom_program.get('run_in_docker', False),
+                    custom_program.get('run_in_container', True),
                 ]
             sql_config = config.get('sql_config')
             if sql_config:
@@ -96,6 +97,8 @@ class TaskForm(forms.ModelForm):
                     sql_config.get('user'),
                     sql_config.get('password'),
                 ]
+        else:
+            self.initial['category'] = builtins.categories.normal
 
     def clean(self):
         cleaned_data = super(TaskForm, self).clean()
@@ -124,7 +127,7 @@ class TaskForm(forms.ModelForm):
                         'password': password,
                     }
             elif field == 'custom_program':
-                bytesio, args, docker_image, run_in_docker = value
+                bytesio, args, docker_image, run_in_container = value
                 if not bytesio:
                     custom_program = config.pop(field, None)
                     if not custom_program or not custom_program.get('executable'):
@@ -134,11 +137,11 @@ class TaskForm(forms.ModelForm):
                             'executable': custom_program.get('executable'),
                             'args': args,
                             'docker_image': docker_image,
-                            'run_in_docker': run_in_docker,
+                            'run_in_container': run_in_container,
                         }
                     break
                 max_size = parent.config.get('max_size', 5 * 1024 * 1024)
-                bytesio, args, docker_image, run_in_docker = value
+                bytesio, args, docker_image, run_in_container = value
                 if bytesio.size > max_size:
                     self.add_error('custom_program', '文件大小不能超过%sM' % round(max_size / 1024 / 1024))
                     break
@@ -155,7 +158,7 @@ class TaskForm(forms.ModelForm):
                     'executable': file,
                     'args': args,
                     'docker_image': docker_image,
-                    'run_in_docker': run_in_docker,
+                    'run_in_container': run_in_container,
                 }
             else:
                 config[field] = value
@@ -369,7 +372,7 @@ SETTINGS_TEMPLATE = """
 
 
 class ConsumerForm(forms.ModelForm):
-    id = forms.CharField(max_length=100, label='订阅ID', widget=forms.HiddenInput())
+    id = forms.CharField(max_length=36, label='订阅ID', widget=forms.HiddenInput())
     consume_url = forms.ChoiceField(label='订阅地址', required=False)
     consume_scheme = forms.ChoiceField(label='订阅Scheme', choices={x: x for x in ['http', 'https']}.items())
     consume_host = forms.ChoiceField(label='订阅Host')
@@ -415,10 +418,14 @@ class ConsumerForm(forms.ModelForm):
             consume_url_choices.append((path, obj.name))
         self.fields['consume_url'].choices = consume_url_choices
         machine = models.current_machine
+        listen_host = os.environ['DJANGO_SERVER_ADDRESS'].split('://')[-1].split(':')[0]
         self.fields['consume_host'].choices = [
             (machine.internet_ip, "外网IP(%s)" % machine.internet_ip),
             (machine.intranet_ip, "内网IP(%s)" % machine.intranet_ip),
         ]
+        if listen_host not in [x[0] for x in self.fields['consume_host'].choices]:
+            self.fields['consume_host'].choices.append((listen_host, "监听IP(%s)" % listen_host))
+            self.initial['consume_host'] = listen_host
         self.fields['consume_queue'].choices = models.ScheduleQueue.objects.filter(status=True
                                                                                    ).values_list('code', 'name')
         self.initial['id'] = str(uuid.uuid4())
@@ -436,11 +443,9 @@ class ConsumerForm(forms.ModelForm):
         if self.errors:
             return cleaned_data
         cleaned_data['machine'] = models.current_machine
-        consume_url = cleaned_data.get('custom_consume_url') or urljoin(
-            "%s://%s:%s/schedule/queue/get/" % (
-                cleaned_data['consume_scheme'], cleaned_data['consume_host'], cleaned_data['consume_port']),
-            cleaned_data.get('consume_queue')
-        )
+        consume_url = cleaned_data.get('custom_consume_url') or "%s://%s:%s/schedule/queue/get/%s/" % (
+                cleaned_data['consume_scheme'], cleaned_data['consume_host'],
+                cleaned_data['consume_port'], cleaned_data.get('consume_queue'))
         consume_kwargs = cleaned_data.get('consume_kwargs')
         if consume_url.startswith('redis'):
             if not consume_kwargs.get('queue'):
@@ -451,14 +456,24 @@ class ConsumerForm(forms.ModelForm):
         elif not consume_url.startswith('http'):
             raise forms.ValidationError('consume url scheme must be http, https, redis or mysql')
         self.instance.container = {
-            'image': cleaned_data.get('container_image'),
-            'name': cleaned_data.get('container_name'),
-            'id': cleaned_data.get('container_id'),
+            'image': cleaned_data['container_image'] or ConsumerContainer.default_image,
+            'name': cleaned_data['container_name'] or ConsumerContainer.default_name + datetime.now().strftime('%Y%m%d%H%M%S'),
+            'id': cleaned_data['container_id'],
         }
         self.validate_setting(cleaned_data['settings'], {})
+        self.instance.id = cleaned_data['id']
+        # replace('\r\n', '\n')消除windows下的换行符带来的影响
+        if cleaned_data['settings'].replace('\r\n', '\n') != SETTINGS_TEMPLATE.strip():
+            self.instance.settings = cleaned_data['settings']
+        else:
+            self.instance.settings = cleaned_data['settings'] = None
         self.instance.consume_url = consume_url
         self.instance.machine = models.current_machine._asdict()
-        ConsumerProgram(self.instance).start_if_not_started()
+        self.instance.queue = cleaned_data['consume_queue']
+        try:
+            ConsumerProgram(self.instance).start_if_not_started()
+        except Exception as e:
+            raise forms.ValidationError(str(e))
         return cleaned_data
 
     def validate_unique(self):

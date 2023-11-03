@@ -19,9 +19,11 @@ urlpatterns = [
     path('schedule/queue/status/', views.ScheduleAPI.status, name='schedule-status'),
     path('schedule/time-parse/', views.ScheduleTimeParseView.as_view()),
     path('exception/', views.ExceptionReportView.as_view(), name='exception-report'),
-
+    path('program/download/<int:task_id>/', views.ProgramDownloadView.as_view(), name='program-download'),
     path('producer/<slug:action>/', views.ProducerView.as_view(), name='producer-action'),
     path('consumer/system/<slug:action>/', views.SystemConsumerView.as_view(), name='system-consumer-action'),
-    path('consumer/user/<slug:action>/', views.UserConsumerView.as_view(), name='user-consumer-action'),
+    path('consumer/user/action/<slug:action>/', views.UserConsumerView.as_view(), name='user-consumer-action'),
+    path('consumer/user/signal/<slug:signal>/', views.UserConsumerView.send_signal, name='user-consumer-signal'),
+    path('consumer/register/', views.ScheduleAPI.register_consumer, name='user-consumer-register'),
 
 ] + router.urls

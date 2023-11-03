@@ -4,16 +4,16 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.management.commands import runserver
 from django.utils.module_loading import import_string
 from django.dispatch import Signal
-import os
 
 
 class Command(runserver.Command):
 
     def run(self, **options):
         import os
+        import socket
         os.environ['DJANGO_SERVER_ADDRESS'] = "%(protocol)s://%(addr)s:%(port)s" % {
             'protocol': self.protocol,
-            'addr': self.addr.replace('0.0.0.0', '127.0.0.1'),
+            'addr': self.addr.replace('0.0.0.0', socket.gethostbyname(socket.gethostname())),
             'port': self.port
         }
         super().run(**options)

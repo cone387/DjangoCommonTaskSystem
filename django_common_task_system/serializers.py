@@ -3,7 +3,6 @@ from . import models
 from django_common_objects.serializers import CommonCategorySerializer, CommonTagSerializer
 from rest_framework import serializers
 
-from .choices import ConsumerSource
 
 TaskModel = get_task_model()
 ScheduleModel = get_schedule_model()
@@ -65,7 +64,7 @@ class QueueScheduleSerializer(ScheduleSerializer):
 
     @staticmethod
     def get_queue(obj):
-        return getattr(obj, 'queue')
+        return getattr(obj, 'queue', None)
 
     class Meta(ScheduleSerializer.Meta):
         # fields = ('id', 'task', 'schedule_time', 'update_time', 'callback', 'user')
@@ -99,22 +98,33 @@ class ExceptionSerializer(serializers.ModelSerializer):
 #         validators = []
 
 
-# class ProgramSerializer(serializers.ModelSerializer):
-#     machine = MachineSerializer(read_only=True)
-#     machine_id = serializers.PrimaryKeyRelatedField(source='machine',
-#                                                     queryset=models.Machine.objects.all(), write_only=True)
-#     consumer_id = serializers.PrimaryKeyRelatedField(source='consumer',
-#                                                      queryset=models.Consumer.objects.all(), write_only=True)
-#
-#     class Meta:
-#         exclude = ('consumer', )
-#         model = models.Program
-
-
 class ConsumerSerializer(serializers.ModelSerializer):
-    # program = ProgramSerializer(required=False)
-    # source = serializers.IntegerField(required=False, default=ConsumerSource.REPORT)
     id = serializers.CharField(max_length=36)
+
+    def validate_machine(self, machine):
+        if not isinstance(machine, dict):
+            raise serializers.ValidationError('machine must be a dict')
+        meta = self.context['request'].META
+        internet_ip = meta.get('HTTP_X_FORWARDED_FOR', meta.get('REMOTE_ADDR', None))
+        machine['internet_ip'] = internet_ip
+        try:
+            models.Machine(**machine)
+        except Exception as e:
+            raise serializers.ValidationError(e)
+        return machine
+
+    @staticmethod
+    def validate_container(container):
+        if not container:
+            return {}
+        if not isinstance(container, dict):
+            raise serializers.ValidationError('container must be a dict')
+        data = {}
+        for filed in models.Container._fields:
+            if container.get(filed) is None:
+                raise serializers.ValidationError(f'{filed} is required')
+            data[filed] = container[filed]
+        return data
 
     class Meta:
         fields = '__all__'
