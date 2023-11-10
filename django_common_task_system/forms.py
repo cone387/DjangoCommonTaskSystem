@@ -1,19 +1,18 @@
 import builtins
 import inspect
 import os
-import uuid
+import time
 from django import forms
 from django.conf import settings
 from django.contrib.admin import widgets
 from django.utils.module_loading import import_string
 from django_common_task_system.choices import (
-    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus, ConsumerSource)
+    ScheduleType, ScheduleTimingType, ScheduleStatus, TaskStatus)
 from django_common_objects.widgets import JSONWidget
 from django_common_task_system.utils import foreign_key
 from datetime import datetime, time as datetime_time
 from .schedule.config import ScheduleConfig
 from django.urls import reverse
-from urllib.parse import urljoin
 from . import models
 from . import get_schedule_model, get_task_model
 from .fields import (NLPSentenceWidget, PeriodScheduleFiled, OnceScheduleField, MultiWeekdaySelectFiled,
@@ -420,15 +419,15 @@ class ConsumerForm(forms.ModelForm):
         machine = models.current_machine
         listen_host = os.environ['DJANGO_SERVER_ADDRESS'].split('://')[-1].split(':')[0]
         self.fields['consume_host'].choices = [
-            (machine.internet_ip, "外网IP(%s)" % machine.internet_ip),
             (machine.intranet_ip, "内网IP(%s)" % machine.intranet_ip),
+            (machine.internet_ip, "外网IP(%s)" % machine.internet_ip),
         ]
         if listen_host not in [x[0] for x in self.fields['consume_host'].choices]:
             self.fields['consume_host'].choices.append((listen_host, "监听IP(%s)" % listen_host))
             self.initial['consume_host'] = listen_host
         self.fields['consume_queue'].choices = models.ScheduleQueue.objects.filter(status=True
                                                                                    ).values_list('code', 'name')
-        self.initial['id'] = str(uuid.uuid4())
+        self.initial['id'] = hex(int(time.time() * 1000))[2:]
         self.initial['consume_port'] = os.environ['DJANGO_SERVER_ADDRESS'].split(':')[-1]
 
     @staticmethod
@@ -473,7 +472,7 @@ class ConsumerForm(forms.ModelForm):
         try:
             ConsumerProgram(self.instance).start_if_not_started()
         except Exception as e:
-            raise forms.ValidationError(str(e))
+            raise forms.ValidationError(f"start error: {e}")
         return cleaned_data
 
     def validate_unique(self):

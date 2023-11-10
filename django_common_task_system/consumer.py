@@ -1,29 +1,74 @@
 import json
+import queue as python_queue
 import traceback
 from typing import Optional, Callable, List
+from django_common_task_system.builtins import builtins
 from django_common_task_system.choices import ContainerStatus
 from django_common_task_system import models
 from docker.errors import APIError
 from datetime import datetime
 from django_common_task_system.serializers import ConsumerSerializer
-from django_common_task_system.cache_service import CacheState, MapKey, cache_agent
+from django_common_task_system.cache_service import MapKey, cache_agent
 import docker
 import os
 
 
 class ConsumerManager:
-    key = MapKey('consumers')
     heartbeat_key = MapKey('consumers:heartbeat')
+    _mapping = {}
 
-    def __init__(self, key: MapKey):
-        self.key = key
+    @classmethod
+    def generate_key(cls, queue_code: str, consumer_id: str = None):
+        if consumer_id:
+            return f'{queue_code}:{consumer_id}'
+        return f'consumers:{queue_code}'
 
-    def all(self) -> List[models.Consumer]:
+    def __new__(cls, queue_code: str):
+        key = cls.generate_key(queue_code)
+        if key not in cls._mapping:
+            cls._mapping[key] = super().__new__(cls)
+        return cls._mapping[key]
+
+    def __init__(self, queue_code: str):
+        schedule_queue = builtins.schedule_queues.get(queue_code)
+        if schedule_queue is None:
+            raise ValueError('queue(%s)不存在' % queue_code)
+        self.key = self.generate_key(queue_code)
+        self.schedule_queue: models.ScheduleQueue = schedule_queue
+        self.queue: python_queue.Queue = schedule_queue.queue
+
+    def consumers(self) -> List[models.Consumer]:
         items = cache_agent.hgetall(self.key)
         if items:
             consumers = [models.Consumer(**json.loads(x)) for x in items.values()]
             return models.QuerySet(consumers, model=models.Consumer)
         return models.QuerySet([], model=models.Consumer)
+
+    @staticmethod
+    def all_consumers() -> List[models.Consumer]:
+        consumers = models.QuerySet([], model=models.Consumer)
+        for manager in ConsumerManager.all_managers():
+            consumers.extend(manager.consumers())
+        return consumers
+
+    @staticmethod
+    def all_managers() -> List['ConsumerManager']:
+        managers = []
+        for key in cache_agent.filter('consumers:'):
+            queue = key.split(':')[1]
+            if queue == 'heartbeat':
+                continue
+            manager = ConsumerManager(queue)
+            managers.append(manager)
+        return managers
+
+    @staticmethod
+    def get_consumer(consumer_id):
+        for manager in ConsumerManager.all_managers():
+            consumer = manager.get(consumer_id)
+            if consumer:
+                return consumer
+        return None
 
     def get(self, consumer_id: str):
         item = cache_agent.hget(self.key, consumer_id)
@@ -60,23 +105,39 @@ class ConsumerManager:
     def read_log(self, consumer_id) -> Optional[str]:
         return cache_agent.get(f'logs:{consumer_id}') or ''
 
+    def get_schedule(self):
+        return self.queue.get_nowait()
+
+    def get_schedule_of_consumer(self, consumer_id):
+        key = self.generate_key(self.schedule_queue.code, consumer_id)
+        item = cache_agent.qpop(key)
+        if item is None:
+            raise python_queue.Empty
+        return json.loads(item)
+
+    def dispatch_schedule(self, schedule: dict, consumer_id=None):
+        if consumer_id is None:
+            self.queue.put(schedule)
+        else:
+            schedule['queue'] = self.schedule_queue.code
+            key = self.generate_key(self.schedule_queue.code, consumer_id)
+            cache_agent.qpush(key, json.dumps(schedule))
+
 
 class MachineManager:
 
     @staticmethod
     def all() -> List[models.Machine]:
-        items = consumer_manager.all()
         machines = []
         macs = set()
-        for item in items:
-            machine = models.Machine(**item.machine)
-            if machine.mac not in macs:
-                machines.append(machine)
-                macs.add(machine.mac)
+        for manager in ConsumerManager.all_managers():
+            consumers = manager.all_consumers()
+            for consumer in consumers:
+                machine = models.Machine(**consumer.machine)
+                if machine.mac not in macs:
+                    machines.append(machine)
+                    macs.add(machine.mac)
         return machines
-
-
-consumer_manager = ConsumerManager(MapKey('consumers)'))
 
 
 class ConsumerContainer:
@@ -148,11 +209,8 @@ class ConsumerProgram:
             start_program = getattr(self, 'run', None)
         assert start_program, 'start or run method must be implemented'
         start_program()
-        # try:
-        #     start_program()
-        # except Exception:
-        #     self.consumer.error = traceback.format_exc()
-        consumer_manager.create(self.consumer)
+        manager = ConsumerManager(self.consumer.queue)
+        manager.create(self.consumer)
 
 
 def consume(model):

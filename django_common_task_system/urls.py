@@ -24,6 +24,6 @@ urlpatterns = [
     path('consumer/system/<slug:action>/', views.SystemConsumerView.as_view(), name='system-consumer-action'),
     path('consumer/user/action/<slug:action>/', views.UserConsumerView.as_view(), name='user-consumer-action'),
     path('consumer/user/signal/<slug:signal>/', views.UserConsumerView.send_signal, name='user-consumer-signal'),
-    path('consumer/register/', views.ScheduleAPI.register_consumer, name='user-consumer-register'),
+    path('consumer/register/', views.UserConsumerView.register_consumer, name='user-consumer-register'),
 
 ] + router.urls

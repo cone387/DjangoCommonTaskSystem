@@ -17,7 +17,6 @@ from django_common_task_system.utils import ip as ip_utils
 from django.utils import timezone
 from functools import cmp_to_key
 from collections import namedtuple
-import uuid
 import re
 
 
@@ -155,6 +154,8 @@ class ScheduleQueue(models.Model):
     user = models.ForeignKey(UserModel, on_delete=models.CASCADE, db_constraint=False, verbose_name='最后更新')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     update_time = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    queue = None
 
     class Meta:
         verbose_name = verbose_name_plural = '计划队列'

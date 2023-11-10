@@ -18,7 +18,7 @@ from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
 from . import models
 from .builtins import builtins
-from .consumer import consumer_manager
+from .consumer import ConsumerManager
 from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
     ScheduleStatus, ExecuteStatus, ConsumerStatus, ContainerStatus
 
@@ -429,7 +429,7 @@ class ConsumerAdmin(admin.ModelAdmin):
     short_id.short_description = 'ID'
 
     def active_time(self, obj: models.Consumer):
-        return consumer_manager.get_heartbeat(obj.id)
+        return ConsumerManager(obj.queue).get_heartbeat(obj.id)
     active_time.short_description = '活跃时间'
 
     def status(self, obj: models.Consumer):
@@ -481,9 +481,10 @@ class ConsumerAdmin(admin.ModelAdmin):
     admin_consume_url.short_description = '消费地址'
 
     def signal(self, obj: models.Consumer):
-        start_url = reverse('user-consumer-signal', args=('start',)) + '?id=%s' % obj.pk
-        stop_url = reverse('user-consumer-signal', args=('stop',)) + '?id=%s' % obj.pk
-        log_url = reverse('user-consumer-signal', args=('log',),) + '?id=%s&admin=1' % obj.pk
+        query = '?id=%s&admin=1&queue=%s' % (obj.id, obj.queue)
+        start_url = reverse('user-consumer-signal', args=('start',)) + query
+        stop_url = reverse('user-consumer-signal', args=('stop',)) + query
+        log_url = reverse('user-consumer-signal', args=('log',),) + query
         start_signal = '<a href="%s" target="_blank">运行</a>' % start_url
         stop_signal = '<a href="%s" target="_blank">停止</a>' % stop_url
         log_signal = '<a href="%s" target="_blank">日志</a>' % log_url
@@ -494,10 +495,10 @@ class ConsumerAdmin(admin.ModelAdmin):
     signal.short_description = '操作'
 
     def get_queryset(self, request):
-        return consumer_manager.all()
+        return ConsumerManager.all_consumers()
 
     def get_object(self, request, object_id, from_field=None):
-        return consumer_manager.get(object_id)
+        return ConsumerManager.get_consumer(object_id)
 
 
 class ScheduleFilter(admin.SimpleListFilter):

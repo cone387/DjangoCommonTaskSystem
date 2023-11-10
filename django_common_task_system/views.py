@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 from queue import Empty
 
@@ -28,7 +27,7 @@ from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.program import ProgramAction, ProgramAgent, ContainerProgramAction
 from .choices import ConsumerStatus, ScheduleStatus, ConsumerSource, TaskStatus
-from .consumer import consumer_manager
+from .consumer import ConsumerManager
 from .builtins import builtins, signal_schedule
 from . import serializers, get_task_model, get_schedule_log_model, get_schedule_model, get_schedule_serializer
 from . import models, system_initialized_signal
@@ -149,24 +148,25 @@ def put_schedules(records: ScheduleRecord):
     return result
 
 
-def get_consumer_or_404(consumer_id: str):
+def get_manger_or_404(queue: str) -> ConsumerManager:
+    if not queue:
+        raise NotFound('queue is required')
+    try:
+        return ConsumerManager(queue)
+    except ValueError:
+        raise NotFound('queue(%s)不存在' % queue)
+
+
+def get_consumer_or_404(manager: ConsumerManager, consumer_id: str):
     if not consumer_id:
         raise NotFound('id(consumer id) is required')
-    consumer = consumer_manager.get(consumer_id)
+    consumer = manager.get(consumer_id)
     if consumer is None:
         raise NotFound('consumer(%s)不存在' % consumer_id)
     return consumer
 
 
 class ScheduleAPI:
-
-    @staticmethod
-    @api_view(['POST'])
-    def register_consumer(request: Request):
-        serializer = serializers.ConsumerSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
-        consumer = consumer_manager.create(serializer.save())
-        return Response(serializers.ConsumerSerializer(consumer).data)
 
     @staticmethod
     @api_view(['GET'])
@@ -178,30 +178,39 @@ class ScheduleAPI:
         consumer_id = request.query_params.get('id')
         if not consumer_id:
             return Response({'error': 'id(consumer id) is required'}, status=status.HTTP_400_BAD_REQUEST)
-        if not consumer_manager.exists(consumer_id):
-            if consumer_manager.in_waitlist(consumer_id):
+        manager = get_manger_or_404(code)
+
+        # 检查消费者是否存在，如果不存在则返回一个注册的任务
+        if not manager.exists(consumer_id):
+            if manager.in_waitlist(consumer_id):
                 return Response({'error': '等待(%s)注册完成' % consumer_id}, status=status.HTTP_400_BAD_REQUEST)
             # 返回一个注册的任务
             data = ScheduleSerializer(signal_schedule.register_consumer).data
             data['queue'] = code
-            consumer_manager.join_waitlist(consumer_id)
+            manager.join_waitlist(consumer_id)
             return Response(data)
-        instance = builtins.schedule_queues.get(code, None)
-        if instance is None:
-            return Response({'error': '队列(%s)不存在' % code}, status=status.HTTP_404_NOT_FOUND)
+
+        # 获取当前队列的访问权限, 可以根据queue和consumer信息来分配不同权限
         permission_validator = builtins.schedule_queue_permissions.get(code, None)
         if permission_validator is not None:
             error = permission_validator.validate(request)
             if error:
                 return Response({'error': error}, status=status.HTTP_403_FORBIDDEN)
+
+        # 首先获取当前队列中的任务, 不同的消费者都只要注册了当前队列，就可以获取到当前队列的任务
+        # 系统还会为每个消费者分配一个指定队列, 这个任务队列只有当前消费者才能获取到
         try:
-            schedule = instance.queue.get_nowait()
+            schedule = manager.get_schedule()
         except Empty:
-            return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
+            # 获取指定消费者的任务
+            try:
+                schedule = manager.get_schedule_of_consumer(consumer_id)
+            except Empty:
+                return Response({'message': 'no schedule for %s' % code}, status=status.HTTP_202_ACCEPTED)
         except Exception as e:
             return Response({'error': 'get schedule error: %s' % e}, status=status.HTTP_400_BAD_REQUEST)
         finally:
-            consumer_manager.heartbeat(consumer_id)
+            manager.heartbeat(consumer_id)
         return Response(schedule)
 
     @staticmethod
@@ -342,20 +351,32 @@ class ScheduleTimeParseView(APIView):
 
 class UserConsumerView(APIView):
 
+    @staticmethod
+    @api_view(['POST'])
+    def register_consumer(request: Request):
+        serializer = serializers.ConsumerSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        consumer = serializer.save()
+        manager = get_manger_or_404(consumer.queue)
+        manager.create(consumer)
+        return Response(serializers.ConsumerSerializer(consumer).data)
+
     def get(self, request, action):
-        consumer = get_consumer_or_404(request.query_params.get('id'))
+        manager = get_manger_or_404(request.query_params.get('queue'))
+        consumer = get_consumer_or_404(manager, request.query_params.get('id'))
         if action == 'log':
-            log = consumer_manager.read_log(consumer.id)
+            log = manager.read_log(consumer.id)
             return HttpResponse(log, content_type='text/plain')
         raise ValidationError('invalid action: %s' % action)
 
     def post(self, request: Request, action):
-        consumer = get_consumer_or_404(request.query_params.get('id'))
+        manager = get_manger_or_404(request.query_params.get('queue'))
+        consumer = get_consumer_or_404(manager, request.query_params.get('id'))
         if action == 'stop':
-            data = consumer_manager.delete(consumer.id)
+            data = manager.delete(consumer.id)
             return Response(data)
         elif action == 'log':
-            consumer_manager.write_log(consumer.id, request.data['log'])
+            manager.write_log(consumer.id, request.data['log'])
             return Response({
                 "message": "OK",
                 "size": len(request.data['log'])
@@ -366,21 +387,17 @@ class UserConsumerView(APIView):
     @staticmethod
     @api_view(['GET'])
     def send_signal(request, signal):
-        consumer = get_consumer_or_404(request.query_params.get('id'))
-        queue = builtins.schedule_queues.get(consumer.queue)
-        if queue is None:
-            return Response({'error': 'queue(%s)不存在' % consumer.queue}, status=status.HTTP_404_NOT_FOUND)
+        manager = get_manger_or_404(request.query_params.get('queue'))
+        consumer = get_consumer_or_404(manager, request.query_params.get('id'))
         if signal == 'stop':
             data = ScheduleSerializer(signal_schedule.stop_consumer).data
-            data['queue'] = consumer.queue
-            queue.queue.put(data)
+            manager.dispatch_schedule(data, consumer.id)
             return Response(data)
         elif signal == 'log':
             data = ScheduleSerializer(signal_schedule.log_consumer).data
-            data['queue'] = consumer.queue
-            queue.queue.put(data)
+            manager.dispatch_schedule(data, consumer.id)
             if request.query_params.get('admin') == '1':
-                url = reverse('user-consumer-action', args=('log', )) + '?id=%s' % consumer.id
+                url = reverse('user-consumer-action', args=('log', )) + '?id=%s&queue=%s' % (consumer.id, consumer.queue)
                 return redirect(url)
             return Response(data)
         raise ValidationError('invalid signal: %s' % signal)

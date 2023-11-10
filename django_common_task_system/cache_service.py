@@ -318,6 +318,14 @@ def _hincrby(name, key, amount=1):
     return value
 
 
+def _filter(name=None):
+    items = {}
+    for k, v in _cache_mapping.items():
+        if name in k:
+            items[k] = v
+    return items
+
+
 _available_commands = {
     'list': _list,
     'pop': _pop,
@@ -339,6 +347,7 @@ _available_commands = {
     'hexists': _hexists,
     'incr': _incr,
     'hincrby': _hincrby,
+    'filter': _filter,
     # 'LINDEX': lambda: HttpResponse(''),
 }
 
@@ -599,6 +608,9 @@ class CacheAgent:
 
     def hexists(self, name, key):
         return bool(int(self.execute('hexists', name, key)))
+
+    def filter(self, name) -> dict:
+        return json.loads(self.execute('filter', name))
 
     def ping(self):
         _socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
