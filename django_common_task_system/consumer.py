@@ -87,6 +87,13 @@ class ConsumerManager:
     def delete(self, consumer_id):
         return cache_agent.hdel(self.key, consumer_id)
 
+    def delete_consumers(self, consumers: List[models.Consumer]):
+        for consumer in consumers:
+            self.delete(consumer.id)
+
+    def delete_consumer(self, consumer: models.Consumer):
+        self.delete(consumer.id)
+
     def heartbeat(self, consumer_id):
         cache_agent.hset(self.heartbeat_key, consumer_id, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
 

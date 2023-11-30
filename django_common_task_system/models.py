@@ -407,6 +407,9 @@ class Consumer(models.Model):
     ):
         pass
 
+    def delete(self, using=None, keep_parents=False):
+        pass
+
 
 class ExceptionScheduleManager(CustomManager):
 

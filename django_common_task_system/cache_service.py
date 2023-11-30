@@ -470,7 +470,7 @@ async def main():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     server_socket.bind(('127.0.0.1', 55555))
-    server = await asyncio.start_server(handle_client, sock=server_socket)
+    server = await asyncio.start_server(handle_client, sock=server_socket, limit=2 ** 10 * 2 ** 10)
     addr = server_socket.getsockname()
     print(f'Cacheing Serving on {addr}')
     await run_cache_manager()

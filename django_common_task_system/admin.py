@@ -1,16 +1,12 @@
 import os
-import docker
-from django.contrib import admin, messages
-from django.core.exceptions import ObjectDoesNotExist
+from django.contrib import admin
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.db.models import Count
 from datetime import datetime, timedelta
-from docker.errors import APIError
 from django.db.models import Exists, OuterRef, Q
 from urllib.parse import urlparse
-from django_common_task_system import consumer
 from django_common_task_system.producer import producer_agent
 from django_common_task_system.system_task_execution import consumer_agent
 from django_common_task_system.schedule import util as schedule_util
@@ -18,9 +14,9 @@ from . import get_task_model, get_schedule_model, get_schedule_log_model
 from . import forms
 from . import models
 from .builtins import builtins
-from .consumer import ConsumerManager
+from .consumer import ConsumerManager, MachineManager
 from .choices import ScheduleType, ScheduleQueueModule, PermissionType, ScheduleTimingType, ScheduleExceptionReason, \
-    ScheduleStatus, ExecuteStatus, ConsumerStatus, ContainerStatus
+    ScheduleStatus, ExecuteStatus
 
 UserModel = models.UserModel
 Task: models.Task = get_task_model()
@@ -473,7 +469,7 @@ class ConsumerAdmin(admin.ModelAdmin):
         try:
             return format_html(
                 '<a href="%s" target="_blank">%s</a>' % (
-                    obj.consume_url + "?id=%s" % obj.id, url.path
+                    obj.consume_url, url.path
                 )
             )
         except Exception as e:
@@ -499,6 +495,10 @@ class ConsumerAdmin(admin.ModelAdmin):
 
     def get_object(self, request, object_id, from_field=None):
         return ConsumerManager.get_consumer(object_id)
+
+    def delete_queryset(self, request, queryset):
+        for consumer in queryset:
+            ConsumerManager(consumer.queue).delete_consumer(consumer)
 
 
 class ScheduleFilter(admin.SimpleListFilter):
@@ -761,17 +761,10 @@ class OverviewAdmin(admin.ModelAdmin):
             },
             position=4
         )
-        # groups = set()
-        # machines = models.Machine.objects.all().count()
-        # for client in models.Consumer.objects.all():
-        #     client: models.Consumer
-        #     machines.add(client.machine_ip)
-        #     groups.add(client.group)
-
         model.objects['client'] = model(
             name="客户端数量",
             state={
-                "机器数量": models.Machine.objects.all().count(),
+                "机器数量": len(MachineManager.all()),
                 # "分组数量": len(groups),
                 "客户端数量": models.Consumer.objects.count()
             },
