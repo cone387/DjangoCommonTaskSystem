@@ -22,6 +22,12 @@ function start() {
   fi
 }
 
+function start_engine(){
+  python manage.py start_engine &
+  echo "engine started"
+}
+
+
 function main() {
   cd django_common_task_system_server
   echo "INIT is $INIT"
@@ -40,7 +46,8 @@ function main() {
       exit 1
   fi
   python manage.py collectstatic --noinput
-  RUN_MAIN="true"
+  export RUN_MAIN="true"
+  start_engine
   start
 }
 

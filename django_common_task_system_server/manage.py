@@ -100,6 +100,9 @@ def main():
     args, _ = parser.parse_known_args()
     if args.option == 'init':
         init_server(args)
+        start_engine()
+    elif args.option == 'start_engine':
+        start_engine()
     elif args.option == 'start':
         start_engine()
         start_server(args)

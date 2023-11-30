@@ -11,3 +11,4 @@ sqlparse>=0.4.3
 tzdata>=2022.7
 docker
 gunicorn
+pymysql
