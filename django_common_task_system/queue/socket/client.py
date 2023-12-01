@@ -7,7 +7,7 @@ class SocketQueue:
 
     def __init__(self, name=None):
         self.agent = CacheAgent()
-        self.name = name or 'default'
+        self.name = name
 
     def qsize(self):
         return self.agent.llen(self.name)

@@ -187,6 +187,8 @@ class Consumer(LocalProgram):
         queue = self.queue
         state = self.state
         event = self._event
+        event.wait(timeout=5)
+        event.set()
         load_executors()
         logger.info('system schedule execution process started')
         while event.is_set():
