@@ -89,6 +89,7 @@ class ScheduleQueues(BuiltinModels):
         ScheduleStatus.TEST.value: 'test',
         ScheduleStatus.DONE.value: 'done',
         ScheduleStatus.ERROR.value: 'error',
+        ScheduleStatus.AUTO.value: 'system',
     }
 
     model_unique_kwargs = ['code']
@@ -99,18 +100,27 @@ class ScheduleQueues(BuiltinModels):
             code=self.status_params_mapping[ScheduleStatus.OPENING.value],
             status=True,
             module=ScheduleQueueModule.DEFAULT,
+            config={
+                'name': self.status_params_mapping[ScheduleStatus.OPENING.value]
+            },
             name='已启用任务',
         )
         self.system = self.model(
-            code='system',
+            code=self.status_params_mapping[ScheduleStatus.AUTO.value],
             status=True,
             module=ScheduleQueueModule.DEFAULT,
+            config={
+                'name': self.status_params_mapping[ScheduleStatus.AUTO.value]
+            },
             name='系统任务',
         )
         self.test = self.model(
             code=self.status_params_mapping[ScheduleStatus.TEST.value],
             status=True,
             module=ScheduleQueueModule.DEFAULT,
+            config={
+                'name': self.status_params_mapping[ScheduleStatus.TEST.value]
+            },
             name='测试任务',
         )
         try:

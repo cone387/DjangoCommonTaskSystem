@@ -15,6 +15,7 @@ function start() {
   if [ "$USE_GUNICORN" == "true" ]
   then
     echo "Starting with gunicorn..."
+    export DJANGO_SERVER_ADDRESS=http://127.0.0.1:8000
     gunicorn -c gunicorn_config.py server.wsgi:application --preload
   else
     echo "Starting with django..."

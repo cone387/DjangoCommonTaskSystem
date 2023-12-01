@@ -5,7 +5,7 @@ from django_common_task_system.cache_service import CacheAgent
 
 class SocketQueue:
 
-    def __init__(self, name=None):
+    def __init__(self, name):
         self.agent = CacheAgent()
         self.name = name
 
