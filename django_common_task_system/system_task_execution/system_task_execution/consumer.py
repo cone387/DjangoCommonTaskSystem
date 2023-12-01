@@ -1,4 +1,3 @@
-import os
 import traceback
 import socket
 import logging
@@ -7,7 +6,6 @@ from django_common_task_system.models import ExceptionReport
 from django_common_task_system import get_schedule_log_model
 from django_common_task_system.choices import ExecuteStatus
 from django_common_task_system.program import LocalProgram, ProgramState, Key
-from django_common_task_system.utils.logger import add_file_handler
 from datetime import datetime
 
 
@@ -112,7 +110,7 @@ class BaseExecutor(object):
                           )
         try:
             log.result['result'] = self.execute()
-        except EmptyResult as e:
+        except Exception as e:
             if hasattr(e, 'status'):
                 log.status = e.status
                 log.result['msg'] = str(e)
