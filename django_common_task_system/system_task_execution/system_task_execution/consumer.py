@@ -188,18 +188,18 @@ class Consumer(LocalProgram):
         event.wait(timeout=5)
         event.set()
         load_executors()
+        state.push()
         logger.info('system schedule execution process started')
         while event.is_set():
-            state.update()
+            success = 1
             try:
                 schedule = queue.get()
                 schedule = Schedule(schedule)
                 logger.info('get schedule: %s', schedule)
                 executor = Executor(schedule)
                 executor.start()
-                state.succeed_count += 1
             except Exception as e:
-                state.failed_count += 1
+                success = 0
                 self.logger.exception(e)
                 try:
                     ExceptionReport.objects.create(
@@ -209,4 +209,10 @@ class Consumer(LocalProgram):
                 except Exception as e:
                     self.logger.exception(e)
             finally:
+                state.pull()
+                state.succeed_count += success
+                state.failed_count += 1 - success
                 state.last_process_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                state.push(last_process_time=state.last_process_time,
+                           succeed_count=state.succeed_count,
+                           failed_count=state.failed_count)

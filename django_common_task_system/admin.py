@@ -712,7 +712,7 @@ class OverviewAdmin(admin.ModelAdmin):
         state = consumer_agent.state
         consumer_state = {
             '程序ID': state.ident,
-            "程序名称": state.program_name,
+            # "程序名称": state.program_name,
             '程序状态': '运行中' if state.is_running else '已停止',
             '已处理计划数量': (state.succeed_count + state.failed_count),
             '成功计划数量': state.succeed_count,
@@ -730,7 +730,7 @@ class OverviewAdmin(admin.ModelAdmin):
         state = producer_agent.state
         producer_state = {
             "程序ID": state.ident,
-            "程序名称": state.program_name,
+            # "程序名称": state.program_name,
             "程序状态": "运行中" if state.is_running else "已停止",
             "已调度计划数量": state.scheduled_count,
             "最近调度时间": state.last_schedule_time,

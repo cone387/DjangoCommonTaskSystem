@@ -636,7 +636,8 @@ class CacheState(dict):
         self.key = key
 
     def __setattr__(self, key, value):
-        self[key] = value
+        if key != 'key':
+            self[key] = value
         super(CacheState, self).__setattr__(key, value)
 
     def commit(self, **kwargs) -> dict:
